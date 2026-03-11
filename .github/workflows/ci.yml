@@ -58,7 +58,7 @@ jobs:
           flake8 . --max-line-length=100 --exclude=__pycache__
 
       - name: Run tests
-        working-directory: backend
+        working-directory: tests
         run: |
           pip install pytest pytest-cov
           pytest --cov=. --cov-report=xml -v
