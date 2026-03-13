@@ -1,4 +1,7 @@
 venv/
 __pycache__/
 *.pyc
-.env
+.env/
+
+# ignore temp local test file
+test_output.json
