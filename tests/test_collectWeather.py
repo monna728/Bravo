@@ -5,7 +5,7 @@ from moto import mock_aws
 from unittest.mock import patch, MagicMock
 
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "data-collection"))
 from collectWeather import (
     fetch_weather_data,
     compute_demand_modifier,
