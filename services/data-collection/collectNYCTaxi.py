@@ -2,6 +2,7 @@ import json
 import boto3
 import requests
 from datetime import datetime, timezone
+from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
 # replace with bucket from AWS
@@ -12,15 +13,12 @@ S3_KEY      = "tlc/raw/tlc_trips.json"
 LIMIT       = 1000
 TIMEZONE    = "America/New_York"
 
-# call the NYC TLC API and return raw records
 def fetch_tlc_data(limit=LIMIT):
     params = {"$limit": limit, "$order": "tpep_pickup_datetime DESC"}
     response = requests.get(NYC_TLC_API, params=params, timeout=30)
-    # checks the HTTP status code of a response and automatically raises an exception if the request was unsuccessful
     response.raise_for_status()
     return response.json()
 
-# calculate trip duration in minutes from the pickup and dropoff timestamps
 def calculate_duration_minutes(pickup_str, dropoff_str):
     fmt = "%Y-%m-%dT%H:%M:%S.%f"
     try:
@@ -29,6 +27,9 @@ def calculate_duration_minutes(pickup_str, dropoff_str):
         return round((dropoff - pickup).total_seconds() / 60, 2)
     except Exception:
         return 0
+    
+def locationid_to_zone(location_id: int):
+    return ZONE_LOOKUP.get(location_id, ("Unknown", "Unknown"))
 
 # convert raw NYC TLC records into the ADAGE 3.0 data model format and each taxi trip becomes one 'event' in the events array
 def transform_to_adage(raw_records):
@@ -51,6 +52,12 @@ def transform_to_adage(raw_records):
         duration_min = calculate_duration_minutes(pickup_time, dropoff_time)
         pickup_formatted = pickup_time.replace("T", " ").replace(".000", ".000000")
 
+        pu_id = int(record.get("pulocationid",0))
+        do_id = int(record.get("dolocationid",0))
+
+        pu_borough, pu_zone = locationid_to_zone(pu_id)
+        do_borough, do_zone = locationid_to_zone(do_id)
+
         event = {
             "time_object": {
                 "timestamp":     pickup_formatted,
@@ -61,8 +68,12 @@ def transform_to_adage(raw_records):
             "event_type": "taxi_pickup",
             "attribute": {
                 "vendorid":           int(record.get("vendorid", 0)),
-                "pulocationid":       int(record.get("pulocationid", 0)),
-                "dolocationid":       int(record.get("dolocationid", 0)),
+                "pickup_locationid":  pu_id,
+                "pickup_zone":        pu_zone,
+                "pickup_borough":     pu_borough,
+                "dropoff_locationid": do_id,
+                "dropoff_zone":       do_zone,
+                "dropoff_borough":    do_borough,
                 "passenger_count":    float(record.get("passenger_count", 0)),
                 "trip_distance":      float(record.get("trip_distance", 0)),
                 "fare_amount":        float(record.get("fare_amount", 0)),
@@ -76,7 +87,6 @@ def transform_to_adage(raw_records):
 
     return adage_output
 
-
 def save_to_s3(data: dict, bucket: str, key: str):
     # save a Python dict as a JSON file to S3 bucket
     s3_client = boto3.client("s3")
@@ -86,9 +96,8 @@ def save_to_s3(data: dict, bucket: str, key: str):
         Body=json.dumps(data, indent=2),
         ContentType="application/json"
     )
-    print(f"✅ Saved to s3://{bucket}/{key}")
+    print(f"Saved to s3://{bucket}/{key}")
 
-# not running yet - running locally first
 # AWS Lambda entry point
 # called automatically by AWS when triggered
 def lambda_handler(event, context):
@@ -116,7 +125,6 @@ def lambda_handler(event, context):
 if __name__ == "__main__":
     import json
 
-    # 50 records for now for local testing
     raw_records = fetch_tlc_data(limit=50)
     print(f"Fetched {len(raw_records)} records")
 
