@@ -55,8 +55,8 @@ def transform_to_adage(raw_records):
         pu_id = int(record.get("pulocationid",0))
         do_id = int(record.get("dolocationid",0))
 
-        pu_zone, pu_borough = locationid_to_zone(pu_id)
-        do_zone, do_borough = locationid_to_zone(do_id)
+        pu_borough, pu_zone = locationid_to_zone(pu_id)
+        do_borough, do_zone = locationid_to_zone(do_id)
 
         event = {
             "time_object": {
