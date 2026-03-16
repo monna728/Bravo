@@ -170,6 +170,7 @@ def test_transform_adage_time_object():
     result = transform_to_adage(MOCK_TM_RESPONSE)
     event = result["events"][0]
     assert event["time_object"]["timestamp"] == "2026-04-15T19:00:00Z"
+    assert event["time_object"]["duration"] == 0
     assert event["time_object"]["timezone"] == "America/New_York"
 
 
@@ -274,3 +275,5 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
     assert len(stored["events"]) == 2
     assert stored["events"][0]["attribute"]["event_name"] == "Madison Square Garden Concert"
     assert stored["events"][0]["event_type"] == "concert"
+
+

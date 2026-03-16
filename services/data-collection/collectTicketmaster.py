@@ -122,7 +122,7 @@ def transform_to_adage(raw_response: dict, city: str = DEFAULT_CITY) -> dict:
         event = {
             "time_object": {
                 "timestamp": start_dt,
-                "duration": None,
+                "duration": 0,
                 "duration_unit": "hour",
                 "timezone": TIMEZONE,
             },
