@@ -1,0 +1,4 @@
+# Analytical Model Service
+prophet>=1.1.0
+pandas>=2.2.0
+boto3>=1.34.0
