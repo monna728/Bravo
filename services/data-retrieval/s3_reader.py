@@ -84,16 +84,16 @@ def filter_events_by_type(events: list[dict], event_type: str) -> list[dict]:
 def filter_events_by_borough(events: list[dict], borough: str) -> list[dict]:
     """Filter events to only those matching a given borough.
 
-    Checks attribute.top_borough (merged data), attribute.pickup_borough
+    Checks attribute.borough (merged data), attribute.top_borough (legacy),
     (taxi data), or attribute.city (ticketmaster/weather) for a match.
     """
     filtered = []
     for event in events:
         attr = event.get("attribute", {})
         event_borough = (
-            attr.get("top_borough")
+            attr.get("borough")
+            or attr.get("top_borough")
             or attr.get("pickup_borough")
-            or attr.get("borough")
             or ""
         )
         if event_borough == borough:
