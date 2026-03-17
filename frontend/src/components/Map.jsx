@@ -18,14 +18,22 @@ export default function Map() {
   });
 
   const [hoveredLocation, setHoveredLocation] = useState(null);
-  const [filters, setFilters] = useState({ type: 'all', borough: 'all', date: '' });
+  const [filters, setFilters] = useState({
+    type: 'all',
+    startDate: '',
+    endDate: '',
+    timeRange: [0, 24],
+  });
   const [mapRef, setMapRef] = useState(null);
 
   const onLoad = useCallback((map) => setMapRef(map), []);
 
   const filteredLocations = LOCATIONS.filter((loc) => {
     if (filters.type !== 'all' && loc.type !== filters.type) return false;
-    if (filters.borough !== 'all' && loc.borough !== filters.borough) return false;
+    if (filters.startDate && loc.date < filters.startDate) return false;
+    if (filters.endDate && loc.date > filters.endDate) return false;
+    const hour = parseInt(loc.time.split(':')[0]);
+    if (hour < filters.timeRange[0] || hour > filters.timeRange[1]) return false;
     return true;
   });
 

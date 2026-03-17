@@ -52,7 +52,7 @@ export default function ListPage() {
 
         {/* Header */}
         <div className="mb-6 pl-24">
-          <h1 className="text-2xl font-bold text-gray-900">Demand Explorer</h1>
+          <h1 className="text-2xl font-bold text-gray-900">RushHour</h1>
           <p className="text-gray-500 text-sm mt-1">Browse and filter NYC taxi demand by event and location</p>
         </div>
 
