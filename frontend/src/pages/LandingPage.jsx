@@ -23,7 +23,7 @@ export default function LandingPage() {
           rush<span className="text-blue-400">hour</span>
         </h1>
         <p className="text-gray-400 text-xl mb-10 font-light">
-          Know the city before it knows you.
+          Find your crowd.
         </p>
         <button
           onClick={() => navigate('/map')}
