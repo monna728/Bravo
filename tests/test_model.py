@@ -87,7 +87,7 @@ def _generate_daily_records(borough: str, num_days: int = 30, base_date: str = "
         d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
         records.append({
             "date": d,
-            "top_borough": borough,
+            "borough": borough,
             "trip_count": 3000 + (i * 100),
             "event_count": 2 + (i % 5),
             "total_expected_attendance": 5000,
@@ -355,7 +355,7 @@ def test_load_historical_data_filters_by_borough(aws_credentials):
     result = load_historical_data("Manhattan", bucket=BUCKET, end_date="2026-02-01")
     assert len(result) == 10
     for r in result:
-        assert r["top_borough"] == "Manhattan"
+        assert r["borough"] == "Manhattan"
 
 
 @mock_aws

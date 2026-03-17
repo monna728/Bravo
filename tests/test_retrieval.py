@@ -84,17 +84,17 @@ MOCK_MERGED_ADAGE = {
         {
             "time_object": {"timestamp": "2026-04-15 00:00:00.000000", "duration": 24, "duration_unit": "hour", "timezone": "America/New_York"},
             "event_type": "daily_demand_features",
-            "attribute": {"date": "2026-04-15", "top_borough": "Manhattan", "trip_count": 5000, "event_count": 2, "temperature_avg_c": 15.0, "dominant_weather": "clear"},
+            "attribute": {"date": "2026-04-15", "borough": "Manhattan", "trip_count": 5000, "event_count": 2, "temperature_avg_c": 15.0, "dominant_weather": "clear"},
         },
         {
             "time_object": {"timestamp": "2026-04-15 00:00:00.000000", "duration": 24, "duration_unit": "hour", "timezone": "America/New_York"},
             "event_type": "daily_demand_features",
-            "attribute": {"date": "2026-04-15", "top_borough": "Brooklyn", "trip_count": 3200, "event_count": 1, "temperature_avg_c": 15.0, "dominant_weather": "clear"},
+            "attribute": {"date": "2026-04-15", "borough": "Brooklyn", "trip_count": 3200, "event_count": 1, "temperature_avg_c": 15.0, "dominant_weather": "clear"},
         },
         {
             "time_object": {"timestamp": "2026-04-16 00:00:00.000000", "duration": 24, "duration_unit": "hour", "timezone": "America/New_York"},
             "event_type": "daily_demand_features",
-            "attribute": {"date": "2026-04-16", "top_borough": "Manhattan", "trip_count": 4800, "event_count": 1, "temperature_avg_c": 12.0, "dominant_weather": "rain"},
+            "attribute": {"date": "2026-04-16", "borough": "Manhattan", "trip_count": 4800, "event_count": 1, "temperature_avg_c": 12.0, "dominant_weather": "rain"},
         },
     ],
 }
@@ -209,14 +209,14 @@ def test_filter_by_borough_manhattan():
     result = filter_events_by_borough(events, "Manhattan")
     assert len(result) == 2
     for e in result:
-        assert e["attribute"]["top_borough"] == "Manhattan"
+        assert e["attribute"]["borough"] == "Manhattan"
 
 
 def test_filter_by_borough_brooklyn():
     events = MOCK_MERGED_ADAGE["events"]
     result = filter_events_by_borough(events, "Brooklyn")
     assert len(result) == 1
-    assert result[0]["attribute"]["top_borough"] == "Brooklyn"
+    assert result[0]["attribute"]["borough"] == "Brooklyn"
 
 
 def test_filter_by_borough_no_match():
@@ -359,7 +359,7 @@ def test_retrieve_merged_with_borough_manhattan(aws_credentials):
     assert result["borough"] == "Manhattan"
     assert result["count"] == 2
     for rec in result["records"]:
-        assert rec["attribute"]["top_borough"] == "Manhattan"
+        assert rec["attribute"]["borough"] == "Manhattan"
 
 
 @mock_aws

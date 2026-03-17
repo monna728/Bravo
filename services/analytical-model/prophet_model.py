@@ -70,7 +70,7 @@ def load_historical_data(
     """Load merged daily records from S3, filtered to a specific borough.
 
     Reads all files under processed/merged/ and returns events whose
-    top_borough matches the requested borough within the lookback window.
+    borough matches the requested borough within the lookback window.
     """
     s3 = boto3.client("s3")
     if end_date:
@@ -93,7 +93,7 @@ def load_historical_data(
         for event in data.get("events", []):
             attr = event.get("attribute", {})
             event_date = attr.get("date", "")
-            event_borough = attr.get("top_borough", "")
+            event_borough = attr.get("borough", "") or attr.get("top_borough", "")
 
             if event_borough != borough:
                 continue
@@ -247,8 +247,6 @@ def predict(
 ) -> dict:
     """Generate Crowd Demand Index predictions for a borough and date range.
 
-    This is the main entry point that orchestrates the full prediction pipeline:
-    load data → build DataFrame → fit Prophet → normalise → apply multipliers.
     """
     warnings = []
 
