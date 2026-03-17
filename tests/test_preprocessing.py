@@ -54,9 +54,14 @@ MOCK_TAXI_ADAGE = {
             "attribute": {"vendorid": 1, "pickup_locationid": 237, "pickup_zone": "Upper East Side South", "pickup_borough": "Manhattan", "dropoff_locationid": 140, "dropoff_zone": "Lenox Hill East", "dropoff_borough": "Manhattan", "passenger_count": 3, "trip_distance": 1.2, "fare_amount": 8.0, "total_amount": 11.8, "payment_type": 2, "congestion_surcharge": 0, "ratecodeid": 1.0},
         },
         {
+            "time_object": {"timestamp": "2026-04-15 14:00:00.000000", "duration": 18.0, "duration_unit": "minute", "timezone": "America/New_York"},
+            "event_type": "taxi_pickup",
+            "attribute": {"vendorid": 1, "pickup_locationid": 61, "pickup_zone": "Crown Heights North", "pickup_borough": "Brooklyn", "dropoff_locationid": 62, "dropoff_zone": "Crown Heights South", "dropoff_borough": "Brooklyn", "passenger_count": 2, "trip_distance": 2.5, "fare_amount": 10.0, "total_amount": 13.0, "payment_type": 1, "congestion_surcharge": 0, "ratecodeid": 1.0},
+        },
+        {
             "time_object": {"timestamp": "2026-04-16 09:30:00.000000", "duration": 15.0, "duration_unit": "minute", "timezone": "America/New_York"},
             "event_type": "taxi_pickup",
-            "attribute": {"vendorid": 2, "pickup_locationid": 100, "pickup_zone": "Garment District", "pickup_borough": "Manhattan", "dropoff_locationid": 200, "dropoff_zone": "Riverdale/North Riverdale/Fieldston", "dropoff_borough": "Bronx", "passenger_count": 2, "trip_distance": 3.0, "fare_amount": 12.0, "total_amount": 16.0, "payment_type": 1, "congestion_surcharge": 2.5, "ratecodeid": 1.0},
+            "attribute": {"vendorid": 2, "pickup_locationid": 100, "pickup_zone": "Garment District", "pickup_borough": "Manhattan", "dropoff_locationid": 200, "dropoff_zone": "Riverdale", "dropoff_borough": "Bronx", "passenger_count": 2, "trip_distance": 3.0, "fare_amount": 12.0, "total_amount": 16.0, "payment_type": 1, "congestion_surcharge": 2.5, "ratecodeid": 1.0},
         },
     ],
 }
@@ -160,44 +165,63 @@ def test_normalise_ticketmaster_empty():
     assert result == []
 
 
-# ── Normaliser: NYC Taxi ─────────────────────────────────────────────────────
+# ── Normaliser: NYC Taxi (per-borough) ──────────────────────────────────────
 
-def test_normalise_taxi_groups_by_date():
+def test_normalise_taxi_groups_by_date_and_borough():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert len(result) == 2
-    assert result[0]["date"] == "2026-04-15"
-    assert result[1]["date"] == "2026-04-16"
+    keys = [(r["date"], r["borough"]) for r in result]
+    assert ("2026-04-15", "Manhattan") in keys
+    assert ("2026-04-15", "Brooklyn") in keys
+    assert ("2026-04-16", "Manhattan") in keys
 
 
-def test_normalise_taxi_trip_count():
+def test_normalise_taxi_record_count():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["trip_count"] == 2
-    assert result[1]["trip_count"] == 1
+    assert len(result) == 3  # Apr15-Manhattan, Apr15-Brooklyn, Apr16-Manhattan
+
+
+def test_normalise_taxi_manhattan_trip_count():
+    result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
+    manhattan_apr15 = [r for r in result if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert manhattan_apr15["trip_count"] == 2
+
+
+def test_normalise_taxi_brooklyn_trip_count():
+    result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
+    brooklyn = [r for r in result if r["borough"] == "Brooklyn"][0]
+    assert brooklyn["trip_count"] == 1
+    assert brooklyn["date"] == "2026-04-15"
 
 
 def test_normalise_taxi_avg_distance():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["avg_trip_distance_miles"] == 3.0  # (4.8 + 1.2) / 2
+    manhattan_apr15 = [r for r in result if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert manhattan_apr15["avg_trip_distance_miles"] == 3.0  # (4.8 + 1.2) / 2
 
 
 def test_normalise_taxi_avg_fare():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["avg_fare_amount"] == 13.25  # (18.5 + 8.0) / 2
+    manhattan_apr15 = [r for r in result if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert manhattan_apr15["avg_fare_amount"] == 13.25  # (18.5 + 8.0) / 2
 
 
 def test_normalise_taxi_avg_duration():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["avg_trip_duration_min"] == 16.75  # (23.5 + 10.0) / 2
+    manhattan_apr15 = [r for r in result if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert manhattan_apr15["avg_trip_duration_min"] == 16.75  # (23.5 + 10.0) / 2
 
 
 def test_normalise_taxi_total_passengers():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["total_passengers"] == 4  # 1 + 3
+    manhattan_apr15 = [r for r in result if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert manhattan_apr15["total_passengers"] == 4  # 1 + 3
 
 
-def test_normalise_taxi_top_borough():
+def test_normalise_taxi_has_borough_field():
     result = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
-    assert result[0]["top_borough"] == "Manhattan"
+    for r in result:
+        assert "borough" in r
+        assert r["borough"] in {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}
 
 
 def test_normalise_taxi_empty():
@@ -219,7 +243,7 @@ def test_normalise_weather_temperature():
     apr15 = result[0]
     assert apr15["temperature_max_c"] == 15.0
     assert apr15["temperature_min_c"] == 12.0
-    assert apr15["temperature_avg_c"] == 13.5  # (15 + 12) / 2
+    assert apr15["temperature_avg_c"] == 13.5
 
 
 def test_normalise_weather_precipitation():
@@ -235,7 +259,7 @@ def test_normalise_weather_dominant_condition():
 
 def test_normalise_weather_avg_demand_modifier():
     result = normalise_weather(MOCK_WEATHER_ADAGE)
-    assert result[0]["avg_demand_modifier"] == 1.07  # (1.0 + 1.15) / 2 = 1.075 -> 1.07 (banker's rounding)
+    assert result[0]["avg_demand_modifier"] == 1.07
 
 
 def test_normalise_weather_empty():
@@ -244,14 +268,25 @@ def test_normalise_weather_empty():
     assert result == []
 
 
-# ── Merger ───────────────────────────────────────────────────────────────────
+# ── Merger (per-borough) ────────────────────────────────────────────────────
 
-def test_merge_combines_all_sources():
+def test_merge_produces_per_borough_records():
     tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
     taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
     weather = normalise_weather(MOCK_WEATHER_ADAGE)
     merged = merge_by_date(tm, taxi, weather)
-    assert len(merged) == 2
+
+    boroughs_apr15 = [r["borough"] for r in merged if r["date"] == "2026-04-15"]
+    assert "Manhattan" in boroughs_apr15
+    assert "Brooklyn" in boroughs_apr15
+
+
+def test_merge_record_count():
+    tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
+    taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
+    weather = normalise_weather(MOCK_WEATHER_ADAGE)
+    merged = merge_by_date(tm, taxi, weather)
+    assert len(merged) == 3  # Apr15-Manhattan, Apr15-Brooklyn, Apr16-Manhattan
 
 
 def test_merge_has_all_fields():
@@ -262,6 +297,7 @@ def test_merge_has_all_fields():
 
     record = merged[0]
     assert "date" in record
+    assert "borough" in record
     assert "location" in record
     assert "event_count" in record
     assert "trip_count" in record
@@ -269,21 +305,31 @@ def test_merge_has_all_fields():
     assert "precipitation_total_mm" in record
     assert "dominant_weather" in record
     assert "sources_present" in record
-    assert "top_borough" in record
 
 
-def test_merge_correct_values_apr15():
+def test_merge_manhattan_apr15_values():
     tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
     taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
     weather = normalise_weather(MOCK_WEATHER_ADAGE)
     merged = merge_by_date(tm, taxi, weather)
 
-    apr15 = merged[0]
-    assert apr15["date"] == "2026-04-15"
-    assert apr15["event_count"] == 2
-    assert apr15["trip_count"] == 2
-    assert apr15["temperature_max_c"] == 15.0
-    assert apr15["precipitation_total_mm"] == 3.5
+    m_apr15 = [r for r in merged if r["date"] == "2026-04-15" and r["borough"] == "Manhattan"][0]
+    assert m_apr15["event_count"] == 2
+    assert m_apr15["trip_count"] == 2
+    assert m_apr15["temperature_max_c"] == 15.0
+    assert m_apr15["precipitation_total_mm"] == 3.5
+
+
+def test_merge_brooklyn_gets_shared_events_and_weather():
+    tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
+    taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
+    weather = normalise_weather(MOCK_WEATHER_ADAGE)
+    merged = merge_by_date(tm, taxi, weather)
+
+    bk_apr15 = [r for r in merged if r["date"] == "2026-04-15" and r["borough"] == "Brooklyn"][0]
+    assert bk_apr15["event_count"] == 2
+    assert bk_apr15["trip_count"] == 1
+    assert bk_apr15["temperature_max_c"] == 15.0
 
 
 def test_merge_sources_present():
@@ -307,13 +353,13 @@ def test_merge_sorted_by_date():
     assert dates == sorted(dates)
 
 
-def test_merge_with_missing_source():
+def test_merge_with_no_taxi_defaults_to_manhattan():
     tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
     merged = merge_by_date(tm, [], [])
     assert len(merged) == 2
+    for r in merged:
+        assert r["borough"] == "Manhattan"
     assert merged[0]["trip_count"] == 0
-    assert merged[0]["top_borough"] == "Unknown"
-    assert merged[0]["temperature_max_c"] == 0
     assert merged[0]["sources_present"] == ["ticketmaster"]
 
 
@@ -340,7 +386,7 @@ def test_merged_to_adage_structure():
 
     assert adage["data_source"] == "merged"
     assert adage["dataset_type"] == "demand_features"
-    assert len(adage["events"]) == 2
+    assert len(adage["events"]) == 3
 
 
 def test_merged_to_adage_validates():
@@ -354,6 +400,17 @@ def test_merged_to_adage_validates():
     assert valid, msg
 
 
+def test_merged_to_adage_has_borough_attribute():
+    tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
+    taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
+    weather = normalise_weather(MOCK_WEATHER_ADAGE)
+    merged = merge_by_date(tm, taxi, weather)
+    adage = merged_to_adage(merged)
+
+    for event in adage["events"]:
+        assert "borough" in event["attribute"]
+
+
 def test_merged_to_adage_event_attributes():
     tm = normalise_ticketmaster(MOCK_TICKETMASTER_ADAGE)
     taxi = normalise_nyc_taxi(MOCK_TAXI_ADAGE)
@@ -362,8 +419,9 @@ def test_merged_to_adage_event_attributes():
     adage = merged_to_adage(merged)
 
     attr = adage["events"][0]["attribute"]
-    assert attr["event_count"] == 2
-    assert attr["trip_count"] == 2
+    assert attr["borough"] == "Brooklyn"  # sorted: Brooklyn before Manhattan
+    assert attr["event_count"] == 2  # events are city-wide, shared
+    assert attr["trip_count"] == 1  # Brooklyn had 1 trip on Apr 15
     assert attr["temperature_max_c"] == 15.0
     assert attr["city"] == "New York"
 
