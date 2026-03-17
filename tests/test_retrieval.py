@@ -2,10 +2,13 @@ import json
 import pytest
 import boto3
 from moto import mock_aws
+import importlib.util
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "data-retrieval"))
+
+_retrieval_dir = os.path.join(os.path.dirname(__file__), "..", "services", "data-retrieval")
+sys.path.insert(0, _retrieval_dir)
 
 from s3_reader import (
     list_keys,
@@ -17,7 +20,12 @@ from s3_reader import (
     retrieve,
     VALID_BOROUGHS,
 )
-from handler import lambda_handler
+
+_handler_spec = importlib.util.spec_from_file_location(
+    "retrieval_handler", os.path.join(_retrieval_dir, "handler.py"))
+_handler_mod = importlib.util.module_from_spec(_handler_spec)
+_handler_spec.loader.exec_module(_handler_mod)
+lambda_handler = _handler_mod.lambda_handler
 
 BUCKET = "test-bucket"
 
