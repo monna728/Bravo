@@ -51,9 +51,10 @@ export default function ListPage() {
       <div className="max-w-2xl mx-auto px-4 py-6">
 
         {/* Header */}
-        <div className="mb-6 pl-24">
-          <h1 className="text-2xl font-bold text-gray-900">RushHour</h1>
-          <p className="text-gray-500 text-sm mt-1">Browse and filter NYC taxi demand by event and location</p>
+        <div className="mb-6 mx-auto text-center">
+          <h1 className="text-7xl font-black text-gray-500 tracking-tight mb-4">
+            rush<span className="text-blue-400">hour</span>
+          </h1>
         </div>
 
         {/* Filters */}
