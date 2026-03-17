@@ -1,10 +1,13 @@
-"""Merge normalised daily records from all three sources by date.
+"""Merge normalised daily records from all three sources.
 
 Takes the output of normaliser.normalise_ticketmaster(), normalise_nyc_taxi(),
-and normalise_weather() and produces one merged record per day.
+and normalise_weather() and produces one merged record per (date, borough) pair.
+Events and weather are city-wide so they're shared across all boroughs.
 """
 
 from datetime import datetime, timezone
+
+VALID_BOROUGHS = {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}
 
 
 def merge_by_date(
@@ -15,44 +18,62 @@ def merge_by_date(
     lat: float = 40.7128,
     lng: float = -74.0060,
 ) -> list[dict]:
-    """Merge normalised records from all three sources into one record per day.
+    """Merge normalised records into one record per (date, borough).
 
-    Returns a sorted list of merged daily records.
+    Taxi data is already per-borough from the normaliser. Events and weather
+    are city-wide, so they're copied into every borough's record for that date.
     """
-    all_dates: set[str] = set()
     tm_by_date = _index_by_date(ticketmaster_daily)
-    taxi_by_date = _index_by_date(taxi_daily)
     weather_by_date = _index_by_date(weather_daily)
 
-    all_dates.update(tm_by_date.keys(), taxi_by_date.keys(), weather_by_date.keys())
+    taxi_by_date_borough: dict[tuple[str, str], dict] = {}
+    all_dates: set[str] = set()
+    boroughs_by_date: dict[str, set[str]] = {}
+
+    for rec in taxi_daily:
+        date_str = rec["date"]
+        borough = rec.get("borough", "Unknown")
+        if borough not in VALID_BOROUGHS:
+            continue
+        taxi_by_date_borough[(date_str, borough)] = rec
+        all_dates.add(date_str)
+        boroughs_by_date.setdefault(date_str, set()).add(borough)
+
+    all_dates.update(tm_by_date.keys(), weather_by_date.keys())
 
     merged = []
     for date_str in sorted(all_dates):
         tm = tm_by_date.get(date_str, {})
-        taxi = taxi_by_date.get(date_str, {})
         weather = weather_by_date.get(date_str, {})
+        date_boroughs = boroughs_by_date.get(date_str, set())
 
-        record = {
-            "date": date_str,
-            "location": {"lat": lat, "lng": lng, "city": city},
-            "event_count": tm.get("event_count", 0),
-            "total_expected_attendance": tm.get("total_expected_attendance", 0),
-            "event_names": tm.get("event_names", []),
-            "trip_count": taxi.get("trip_count", 0),
-            "avg_trip_distance_miles": taxi.get("avg_trip_distance_miles", 0),
-            "avg_fare_amount": taxi.get("avg_fare_amount", 0),
-            "avg_trip_duration_min": taxi.get("avg_trip_duration_min", 0),
-            "total_passengers": taxi.get("total_passengers", 0),
-            "top_borough": taxi.get("top_borough", "Unknown"),
-            "temperature_max_c": weather.get("temperature_max_c", 0),
-            "temperature_min_c": weather.get("temperature_min_c", 0),
-            "temperature_avg_c": weather.get("temperature_avg_c", 0),
-            "precipitation_total_mm": weather.get("precipitation_total_mm", 0),
-            "avg_demand_modifier": weather.get("avg_demand_modifier", 1.0),
-            "dominant_weather": weather.get("dominant_weather", "unknown"),
-            "sources_present": _sources_present(tm, taxi, weather),
-        }
-        merged.append(record)
+        if not date_boroughs:
+            date_boroughs = {"Manhattan"}
+
+        for borough in sorted(date_boroughs):
+            taxi = taxi_by_date_borough.get((date_str, borough), {})
+
+            record = {
+                "date": date_str,
+                "borough": borough,
+                "location": {"lat": lat, "lng": lng, "city": city},
+                "event_count": tm.get("event_count", 0),
+                "total_expected_attendance": tm.get("total_expected_attendance", 0),
+                "event_names": tm.get("event_names", []),
+                "trip_count": taxi.get("trip_count", 0),
+                "avg_trip_distance_miles": taxi.get("avg_trip_distance_miles", 0),
+                "avg_fare_amount": taxi.get("avg_fare_amount", 0),
+                "avg_trip_duration_min": taxi.get("avg_trip_duration_min", 0),
+                "total_passengers": taxi.get("total_passengers", 0),
+                "temperature_max_c": weather.get("temperature_max_c", 0),
+                "temperature_min_c": weather.get("temperature_min_c", 0),
+                "temperature_avg_c": weather.get("temperature_avg_c", 0),
+                "precipitation_total_mm": weather.get("precipitation_total_mm", 0),
+                "avg_demand_modifier": weather.get("avg_demand_modifier", 1.0),
+                "dominant_weather": weather.get("dominant_weather", "unknown"),
+                "sources_present": _sources_present(tm, taxi, weather),
+            }
+            merged.append(record)
 
     return merged
 
@@ -90,6 +111,7 @@ def merged_to_adage(
             "event_type": "daily_demand_features",
             "attribute": {
                 "date": record["date"],
+                "borough": record["borough"],
                 "city": location.get("city", ""),
                 "latitude": location.get("lat"),
                 "longitude": location.get("lng"),
@@ -101,7 +123,6 @@ def merged_to_adage(
                 "avg_fare_amount": record["avg_fare_amount"],
                 "avg_trip_duration_min": record["avg_trip_duration_min"],
                 "total_passengers": record["total_passengers"],
-                "top_borough": record["top_borough"],
                 "temperature_max_c": record["temperature_max_c"],
                 "temperature_min_c": record["temperature_min_c"],
                 "temperature_avg_c": record["temperature_avg_c"],

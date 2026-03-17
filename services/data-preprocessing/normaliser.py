@@ -1,7 +1,10 @@
 """Normalise raw ADAGE data from each source into flat daily records.
 
 Each normalise function takes an ADAGE 3.0 dict (as produced by the collectors)
-and returns a list of dicts, one per day, with standardised keys ready for merging.
+and returns a list of dicts with standardised keys ready for merging.
+
+Taxi data is grouped by (date, borough) so every borough gets its own record.
+Ticketmaster and weather are grouped by date (city-wide, shared across boroughs).
 """
 
 from datetime import datetime
@@ -42,17 +45,17 @@ def normalise_ticketmaster(adage_data: dict) -> list[dict]:
 
 
 def normalise_nyc_taxi(adage_data: dict) -> list[dict]:
-    """Normalise NYC TLC ADAGE data into daily trip summaries.
+    """Normalise NYC TLC ADAGE data into per-borough daily trip summaries.
 
-    Returns one record per day with trip_count, avg distance, and avg fare.
+    Returns one record per (date, borough) pair so every borough that had
+    trips on a given day gets its own record with trip_count, avg distance, etc.
     """
-    daily: dict[str, dict] = defaultdict(lambda: {
+    daily_borough: dict[tuple[str, str], dict] = defaultdict(lambda: {
         "trip_count": 0,
         "total_distance": 0.0,
         "total_fare": 0.0,
         "total_duration": 0.0,
         "total_passengers": 0,
-        "boroughs": [],
     })
 
     for event in adage_data.get("events", []):
@@ -63,28 +66,30 @@ def normalise_nyc_taxi(adage_data: dict) -> list[dict]:
             continue
 
         attr = event.get("attribute", {})
-        day = daily[date_str]
+        pickup_borough = attr.get("pickup_borough", "Unknown")
+        if not pickup_borough or pickup_borough == "Unknown":
+            pickup_borough = "Unknown"
+
+        key = (date_str, pickup_borough)
+        day = daily_borough[key]
         day["trip_count"] += 1
         day["total_distance"] += float(attr.get("trip_distance", 0))
         day["total_fare"] += float(attr.get("fare_amount", 0))
         day["total_duration"] += float(duration)
         day["total_passengers"] += int(float(attr.get("passenger_count", 0)))
-        pickup_borough = attr.get("pickup_borough", "")
-        if pickup_borough and pickup_borough != "Unknown":
-            day["boroughs"].append(pickup_borough)
 
     result = []
-    for date_str, info in sorted(daily.items()):
+    for (date_str, borough), info in sorted(daily_borough.items()):
         count = info["trip_count"]
         result.append({
             "date": date_str,
+            "borough": borough,
             "source": "nyc_tlc",
             "trip_count": count,
             "avg_trip_distance_miles": round(info["total_distance"] / count, 2) if count else 0,
             "avg_fare_amount": round(info["total_fare"] / count, 2) if count else 0,
             "avg_trip_duration_min": round(info["total_duration"] / count, 2) if count else 0,
             "total_passengers": info["total_passengers"],
-            "top_borough": _most_common(info["boroughs"]) if info["boroughs"] else "Unknown",
         })
     return result
 
