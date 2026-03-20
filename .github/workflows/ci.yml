@@ -31,7 +31,7 @@ jobs:
       # - name: Check formatting with black
       #   run: black --check .
 
-      - name: Run tests with pytest
-        run: pytest
+      - name: Run tests with pytest with coverage
+        run: pytest --cov=services --cov-report=term-missing --cov-report=xml --cov-fail-under=85
         env:
           FLASK_ENV: testing
