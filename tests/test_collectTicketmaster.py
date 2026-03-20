@@ -17,7 +17,9 @@ from collectTicketmaster import (
     extract_datetime,
     transform_to_adage,
     save_to_s3,
+    lambda_handler,
     S3_BUCKET,
+    S3_KEY_PREFIX,
 )
 
 
@@ -277,3 +279,40 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
     assert stored["events"][0]["event_type"] == "concert"
 
 
+# ── Missing Coverage.. ────────────────────────────────────────────────────────
+
+@mock_aws
+def test_lambda_handler_writes_response_and_s3_object(aws_credentials):
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("collectTicketmaster.fetch_events", return_value=MOCK_TM_RESPONSE):
+        response = lambda_handler(
+            {
+                "city": "New York",
+                "state_code": "NY",
+                "country_code": "US",
+                "start_date": "2026-04-01",
+                "end_date": "2026-04-30",
+                "classification": "Music",
+            },
+            None,
+        )
+
+    assert response["statusCode"] == 200
+    assert response["headers"]["Content-Type"] == "application/json"
+
+    body = json.loads(response["body"])
+    assert body["message"] == "Ticketmaster data collection complete"
+    assert body["records_collected"] == 2
+    assert body["total_available"] == 2
+    assert body["s3_location"].startswith(f"s3://{S3_BUCKET}/{S3_KEY_PREFIX}/")
+
+    objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=S3_KEY_PREFIX)
+    keys = [obj["Key"] for obj in objects.get("Contents", [])]
+    assert len(keys) == 1
+
+    stored = s3.get_object(Bucket=S3_BUCKET, Key=keys[0])
+    saved = json.loads(stored["Body"].read())
+    assert saved["data_source"] == "ticketmaster"
+    assert len(saved["events"]) == 2
