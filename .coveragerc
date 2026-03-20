@@ -3,4 +3,4 @@ source = services
 omit =
   */__init__.py
   */handler.py
-  services/shared/adage_converter.py
+  services/shared/*
