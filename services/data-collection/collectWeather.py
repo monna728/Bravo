@@ -4,8 +4,7 @@ import requests
 from datetime import datetime, timezone
 
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
-# replace with bucket from AWS
-S3_BUCKET      = "bucket-placeholder"
+S3_BUCKET      = "rushhour-data"
 # replace with path inside bucket
 S3_KEY         = "weather/raw/weather_forecast.json"
 # NYC coordinates (Midtown Manhattan)
