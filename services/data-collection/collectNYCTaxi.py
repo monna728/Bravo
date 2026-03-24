@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
-# replace with bucket from AWS
-S3_BUCKET   = "bucket-placeholder"
+S3_BUCKET   = "rushhour-data"
 # replace with path inside bucket
 S3_KEY      = "tlc/raw/tlc_trips.json"
 # 1000 for now

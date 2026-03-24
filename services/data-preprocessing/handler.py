@@ -19,7 +19,7 @@ from shared.adage_validator import validate_adage3
 from normaliser import normalise_ticketmaster, normalise_nyc_taxi, normalise_weather
 from merger import merge_by_date, merged_to_adage
 
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "bucket-placeholder")
+S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
 TIMEZONE = "America/New_York"
 
 RAW_PREFIXES = {

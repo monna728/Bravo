@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2/events.json"
 API_KEY = os.environ.get("TICKETMASTER_API_KEY", "")
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "bucket-placeholder")
+S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
 S3_KEY_PREFIX = "ticketmaster/raw"
 DEFAULT_CITY = "New York"
 DEFAULT_STATE = "NY"
