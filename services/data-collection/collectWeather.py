@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
 S3_BUCKET      = "rushhour-data"
+# S3_KEY = f"weather/raw/weather_forecast_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
 S3_KEY         = "weather/raw/weather_forecast.json"
 # NYC coordinates (Midtown Manhattan)
 DEFAULT_LAT    = 40.7128
@@ -122,7 +123,7 @@ def save_to_s3(data: dict, bucket: str, key: str):
         Body=json.dumps(data, indent=2),
         ContentType="application/json"
     )
-    print(f"✅ Saved to s3://{bucket}/{key}")
+    print(f"Saved to s3://{bucket}/{key}")
 
 
 def lambda_handler(event, context):
