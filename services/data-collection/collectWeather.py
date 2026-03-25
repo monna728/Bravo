@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
 S3_BUCKET      = "rushhour-data"
-# replace with path inside bucket
 S3_KEY         = "weather/raw/weather_forecast.json"
 # NYC coordinates (Midtown Manhattan)
 DEFAULT_LAT    = 40.7128
@@ -126,8 +125,6 @@ def save_to_s3(data: dict, bucket: str, key: str):
     print(f"✅ Saved to s3://{bucket}/{key}")
 
 
-# AWS Lambda entry point
-# called automatically by AWS when triggered
 def lambda_handler(event, context):
     print("Starting weather data collection...")
 
@@ -152,15 +149,10 @@ def lambda_handler(event, context):
     }
 
 
-# locally testing before using AWS S3 bucket
 if __name__ == "__main__":
-    raw_response = fetch_weather_data()
-    print(f"Fetched {len(raw_response.get('hourly', {}).get('time', []))} hourly records")
+    print("Running local test (simulating Lambda)...")
 
-    adage_data = transform_to_adage(raw_response)
-    print(f"Transformed {len(adage_data['events'])} events")
+    response = lambda_handler(event={}, context=None)
 
-    # creating test output file for local testing
-    with open("test_weather_output.json", "w") as f:
-        json.dump(adage_data, f, indent=2)
-    print("Output saved to test_weather_output.json")
+    print("Lambda response:")
+    print(json.dumps(response, indent=2))
