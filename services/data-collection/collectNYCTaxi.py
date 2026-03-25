@@ -6,9 +6,8 @@ from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
 S3_BUCKET   = "rushhour-data"
-# replace with path inside bucket
-S3_KEY      = "tlc/raw/tlc_trips.json"
-# 1000 for now
+S3_KEY = f"tlc/raw/tlc_trips_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+# S3_KEY      = "tlc/raw/tlc_trips.json"
 LIMIT       = 1000
 TIMEZONE    = "America/New_York"
 
@@ -97,8 +96,7 @@ def save_to_s3(data: dict, bucket: str, key: str):
     )
     print(f"Saved to s3://{bucket}/{key}")
 
-# AWS Lambda entry point
-# called automatically by AWS when triggered
+
 def lambda_handler(event, context):
     print("Starting TLC data collection...")
 
@@ -108,7 +106,13 @@ def lambda_handler(event, context):
     adage_data = transform_to_adage(raw_records)
     print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
 
-    save_to_s3(adage_data, S3_BUCKET, S3_KEY)
+
+    try:
+        # check
+        print(f"Attempting to save {len(adage_data['events'])} events to s3://{S3_BUCKET}/{S3_KEY}")
+        save_to_s3(adage_data, S3_BUCKET, S3_KEY)
+    except Exception as e:
+        print("Failed to save to S3:", e)
 
     return {
         "statusCode": 200,
@@ -120,17 +124,10 @@ def lambda_handler(event, context):
     }
 
 
-# locally testing before using AWS S3 bucket
 if __name__ == "__main__":
-    import json
+    print("Running local test (simulating Lambda)...")
 
-    raw_records = fetch_tlc_data(limit=50)
-    print(f"Fetched {len(raw_records)} records")
+    response = lambda_handler(event={}, context=None)
 
-    adage_data = transform_to_adage(raw_records)
-    print(f"Transformed {len(adage_data['events'])} events")
-
-    # creating test output file for local testing
-    with open("test_output.json", "w") as f:
-        json.dump(adage_data, f, indent=2)
-    print("Output saved to test_output.json")
+    print("Lambda response:")
+    print(json.dumps(response, indent=2))
