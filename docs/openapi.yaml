@@ -1,0 +1,589 @@
+openapi: 3.0.0
+servers: []
+info:
+  title: Predictive Demand Intelligence API
+  description: |
+    A REST API that collects, retrieves, and preprocesses data from event sources, and predicts the supply-demand imbalance before it occurs as a Crowd Demand Index (`0 – 100`).
+
+    **Company:** RushHour
+    
+    **Team:** TEAM W13A_BRAVO
+  version: "1.0.0"
+# servers:
+  # - url:
+tags:
+  - name: Data Collection
+  - name: Data Retrieval
+  - name: Data Preprocessing
+  - name: Analytical Model
+paths:
+  /collect/taxi:
+    post:
+      tags: [Data Collection]
+      summary: Collects NYC taxi trip event data
+      description: |
+        Scraps the latest NYC taxi trips from NYC TLC API, and stores the raw data in S3 using the ADAGE 3.0 format.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  example: 1000
+                  description: Number of records to fetch (default 1000)
+      responses:
+        "200":
+          description: Successfully collected Taxi trip data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionResponse'
+        "500":
+          description: Failed to write in S3 or NYC TLC API error.
+  
+  /collect/ticketmaster:
+    post:
+      tags: [Data Collection]
+      summary: Collects Ticketmaster public event data
+      description: |
+        Scraps public events from the Ticketmaster Discovery API and stores the raw data in S3 using the ADAGE 3.0 format.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                city:
+                  type: string
+                  example: New York
+                state_code:
+                  type: string
+                  example: NY
+                country_code:
+                  type: string
+                  example: US
+                start_date:
+                  type: string
+                  format: date
+                  example: "2026-03-29"
+                end_date:
+                  type: string
+                  format: date
+                  example: "2026-04-05"
+                classification:
+                  type: string
+                  example: Music
+                  description: "Music | Sports | Arts & Theatre | Film | Miscellaneous"
+      responses:
+        "200":
+          description: Successfully collected Ticketmaster data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionResponse"
+        "400":
+          description: Missing or invalid API key
+        "429":
+          description: Ticketmaster rate limit exceeded (5 req/s on free tier)
+        "500":
+          description: Ticketmaster API error or S3 write failure
+  
+  /collect/weather:
+    post:
+      tags: [Data Collection]
+      summary: Collects weather forecast event data
+      description: |
+        Scraps a 7-day hourly weather forecast from Open-Meteo API, and stores the raw data in S3 using the ADAGE 3.0 format.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lat:
+                  type: number
+                  example: -72
+                  description: Latitude (defaults to NYC Midtown)
+                lng:
+                  type: number
+                  example: 115
+                  description: Longitude (defaults to NYC Midtown)
+      responses:
+        "200":
+          description: Successfully collected weather data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionResponse'
+        "500":
+          description: Failed to write in S3 or Open-Meteo API error.
+
+  /retrieve:
+    get:
+      tags: [Data Retrieval]
+      summary: Retrieves record of event data stored in S3
+      description: |
+        Retrieves ADAGE 3.0 event records from S3, and filters them by data source, date range, event type, borough, and record count.
+      parameters:
+        - name: source
+          in: query
+          description: Data source(s) to retrieve from S3.
+          schema:
+            type: string
+            enum: [nyc_tlc, ticketmaster, open_meteo, merged, all]
+            default: all
+        - name: start_date
+          in: query
+          description: Filter events starting from this date `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+            example: "2026-03-23"
+        - name: end_date
+          in: query
+          description: Filter events ending at this date `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+            example: "2026-04-18"
+        - name: event_type
+          in: query
+          description: Filter events by event type (e.g. taxi_pickup, weather_forecast, concert).
+          schema:
+            type: string
+            example: taxi_pickup
+        - name: borough
+          in: query
+          description: Filter by NYC borough.
+          schema:
+            type: string
+            enum: [Manhattan, Brooklyn, Queens, Bronx, Staten Island]
+        - name: limit
+          in: query
+          description: Maximum number of records to retrieve.
+          schema:
+            type: integer
+            example: 100
+        - name: processed
+          in: query
+          description: Set as `true` to retrieve the merged and normalised data processed from raw events records.
+          schema:
+            type: boolean
+            example: true
+        - name: bucket
+          in: query
+          description: S3 bucket name (defaults to S3_BUCKET_NAME)
+          schema:
+            type: string
+            example: rushhour-data
+      responses:
+        "200":
+          description: Successfully retrieved ADAGE event data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveResponse'
+        "400":
+          description: Invalid query parameter (borough, source, or limit).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: S3 read failure or internal runtime error.
+
+  /preprocess:
+    post:
+      tags: [Data Preprocessing]
+      summary: Normalises and merges raw event data from S3
+      description: |
+        Preprocesses raw ADAGE 3.0 data from S3 across all collected sources (`nyc_tlc`, `ticketmaster`, `open_meteo`). The raw datasets are validated, normalised, and merged into a single daily `merged` record per borough. The processed output is then stored back to s3.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  type: string
+                  example: rushhour-data
+                  description: S3 bucket name (defaults to S3_BUCKET_NAME)
+      responses:
+        "200":
+          description: Successfully preprocessed and merged raw event data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreprocessResponse'
+        "500":
+          description: S3 read/write failure, or validation error, or internal runtime error.
+  /predict:
+    post:
+      tags: [Analytical Model]
+      summary: Predicts Crowd Demand Index for a borough and date range
+      description: |
+        Loads merged historical data from S3, builds a Prophet time-series model with taxi volume, event count, and weather as regressors, and returns a Crowd Demand Index (`0 – 100`) prediction for the requested borough and date range.
+
+        Weighted signals:
+        - NYC taxi trip volume: 50%
+        - Ticketmaster events: 30%
+        - Weather impact: 20%
+
+        If insufficient historical data is available, a fallback prediction of `50.0` is returned with a `warning` status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [borough, start_date, end_date]
+              properties:
+                borough:
+                  type: string
+                  enum: [Manhattan, Brooklyn, Queens, Bronx, Staten Island]
+                  description: Target borough for demand prediction. (Required unless `compare_all_boroughs` is true).
+                  example: Manhattan
+                start_date:
+                  type: string
+                  format: date
+                  description: Start of prediction window(YYYY-MM-DD).
+                  example: "2026-12-24"
+                end_date:
+                  type: string
+                  format: date
+                  example: "2026-12-26"
+                  description: End of prediction window (YYYY-MM-DD).
+                time_of_day:
+                  type: string
+                  description: (Optional) Scales predictions to a specific time frame.
+                  enum: [morning, afternoon, evening, night, all]
+                  default: all
+                event_type:
+                  type: string
+                  description: (Optional) filter by event type.
+                  example: concert
+                compare_all_boroughs:
+                  type: boolean
+                  description: (Optional) If `true` returns predictions for all 5 boroughs. (Mutually exclusive with `borough` field).
+                  default: false
+                bucket:
+                  type: string
+                  description: S3 bucket name (defaults to S3_BUCKET_NAME).
+                  example: rushhour-data
+      responses:
+        "200":
+          description: Successfully generated demand predictions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticalResponse'
+        "400":
+          description: Missing required fields or invalid parameter (`borough`, `start_date`, `end_date`, `time_of_day`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: S3 read failure or Prophet model build failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticalModelErrorResponse'
+
+components:
+  schemas:
+    WeatherEvent:
+      type: object
+      description: Weather forecast record in ADAGE 3.0 data format
+      properties:
+        time_object:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+              example: 2026-04-20T21:35:67Z
+            duration:
+              type: integer
+              example: 1
+            duration_unit:
+              type: string
+              example: hour
+            timezone:
+              type: string
+              example: UTC
+        event_type:
+          type: string
+          example: weather_forecast
+        attribute:
+          type: object
+          properties: 
+            latitude:
+              type: number
+              example: -72
+            longitude:
+              type: number
+              example: 115
+            precipitation_mm:
+              type: number
+              example: 5
+            temperature_c:
+              type: number
+              example: 19
+            precipitation_probability:
+              type: number
+              example: 21
+            demand_modifier:
+              type: number
+              example: 1.05
+            weather_category:
+              type: string
+              example: clear
+
+    CollectionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Weather data collection complete
+        records_collected:
+          type: integer
+          example: 196
+        s3_location:
+          type: string
+          example: s3://rushhour-data/weather/raw/weather_forecast.json
+
+    RetrieveResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        borough:
+          type: string
+          example: Manhattan
+        count:
+          type: integer
+          example: 67
+        files_read:
+          type: integer
+          example: 3
+        filters_applied:
+          type: object
+          properties:
+            source:
+              type: string
+            start_date:
+              type: string
+            end_date:
+              type: string
+            event_type:
+              type: string
+            borough:
+              type: string
+            limit:
+              type: integer
+        records:
+          type: array
+          description: |
+            The ADAGE 3.0 Event objects in records can vary based on data source filters. This example contains WeatherEvent schema that may be returned.
+          items:
+            $ref: '#/components/schemas/WeatherEvent'
+    ErrorResponse:
+      type: object
+      description: Example for invalid borough
+      properties:
+        status:
+          type: string
+          example: error
+        error:
+          type: string
+          example: "Invalid borough: Florida"
+        valid_boroughs:
+          type: array
+          items:
+            type: string
+            example: [Bronx, Brooklyn, Manhattan, Queens, Staten Island]
+    PreprocessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Preprocessing complete
+        merged_records:
+          type: integer
+          description: Total number of merged daily borough records written to S3.
+          example: 16
+        s3_key:
+          type: string
+          example: processed/merged/merged_NYC_20260416140000.json
+        sources:
+          type: object
+          description: Number of raw S3 files read per data source.
+          properties:
+            ticketmaster_files:
+              type: integer
+              example: 6
+            taxi_files:
+              type: integer
+              example: 7
+            weather_files:
+              type: integer
+              example: 5
+        daily_records:
+          type: object
+          description: Number of normalised daily records per source before the merge.
+          properties:
+            ticketmaster:
+              type: integer
+              example: 14
+            taxi:
+              type: integer
+              example: 27
+            weather:
+              type: integer
+              example: 11
+    AnalyticalModelErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        borough:
+          type: string
+          example: Florida
+        message:
+          type: string
+          example: "Prophet model fitting failed: (error message)"
+        predictions:
+          type: object
+          properties:
+            date:
+              type: string
+              format: date-time
+              example: 2026-04-20T21:35:67Z
+            demand_index:
+              type: number
+              example: 50.0
+            confidence_lower:
+              type: number
+              example: 30.0
+            confidence_upper: 
+              type: number
+              example: 70.0
+            time_of_day: 
+              type: string
+              enum: [morning, afternoon, evening, night, all]
+              example: all
+            weather_condition:
+              type: string
+              enum: [thunderstorm, snow, rain, showers, fog, cloudy, clear, unknown]
+              example: unknown
+            weather_multiplier:
+              type: number
+              example: 1.0
+        contributing_factors:
+          type: object
+          properties:
+            taxi_signal:
+              type: number
+              example: 0.0
+            event_signal:
+              type: number
+              example: 0.1
+            weather_impact:
+              type: number
+              example: 1.0
+            active_events:
+              type: number
+              example: 0.0
+        model_info:
+          type: object
+          properties:
+            training_days:
+              type: integer
+              example: 100
+            borough:
+              type: string
+              example: Manhattan
+            lookback_days:
+              type: integer
+              example: 60
+    PredictionRecord:
+      type: object
+      description: A single day's Crowd Demand Index prediction.
+      properties:
+        date:
+          type: string
+          format: date
+          example: 2026-04-15
+        demand_index:
+          type: number
+          description: Predicted demand score from 0 (low) to 100 (high).
+          example: 72.4
+        confidence_lower:
+          type: number
+          example: 58.1
+        confidence_upper:
+          type: number
+          example: 85.3
+        time_of_day:
+          type: string
+          example: evening
+        weather_condition:
+          type: string
+          example: clear
+        weather_multiplier:
+          type: number
+          example: 1.0
+    AnalyticalResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success, warning, error]
+          example: success
+        borough:
+          type: string
+          example: Manhattan
+        predictions:
+          type: array
+          description: Per-day Crowd Demand Index predictions for the requested date range.
+          items:
+            $ref: '#/components/schemas/PredictionRecord'
+        contributing_factors:
+          type: object
+          description: Breakdown of signal contributions used in the prediction.
+          properties:
+            taxi_signal:
+              type: number
+              description: Normalised taxi trip volume signal (0–1).
+              example: 0.85
+            event_signal:
+              type: number
+              description: Normalised event count signal (0–1).
+              example: 0.4
+            weather_impact:
+              type: number
+              description: Weather demand multiplier applied to predictions.
+              example: 1.0
+            active_events:
+              type: integer
+              description: Number of active events on the last historical day.
+              example: 3
+        model_info:
+          type: object
+          properties:
+            training_days:
+              type: integer
+              description: Number of historical daily records used to train the model.
+              example: 87
+            borough:
+              type: string
+              example: Manhattan
+            lookback_days:
+              type: integer
+              description: Historical window used for training (default 90 days).
+              example: 90
