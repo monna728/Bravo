@@ -313,19 +313,246 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CollectionSuccessSimple"
+                $ref: '#/components/schemas/CollectionResponse'
+        "500":
+          description: Failed to write in S3 or Open-Meteo API error.
+
+  /retrieve:
+    get:
+      tags: [Data Retrieval]
+      summary: Retrieves record of event data stored in S3
+      description: |
+        Retrieves ADAGE 3.0 event records from S3, and filters them by data source, date range, event type, borough, and record count.
+      parameters:
+        - name: source
+          in: query
+          description: Data source(s) to retrieve from S3.
+          schema:
+            type: string
+            enum: [nyc_tlc, ticketmaster, open_meteo, merged, all]
+            default: all
+        - name: start_date
+          in: query
+          description: Filter events starting from this date `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+            example: "2026-03-23"
+        - name: end_date
+          in: query
+          description: Filter events ending at this date `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+            example: "2026-04-18"
+        - name: event_type
+          in: query
+          description: Filter events by event type (e.g. taxi_pickup, weather_forecast, concert).
+          schema:
+            type: string
+            example: taxi_pickup
+        - name: borough
+          in: query
+          description: Filter by NYC borough.
+          schema:
+            type: string
+            enum: [Manhattan, Brooklyn, Queens, Bronx, Staten Island]
+        - name: limit
+          in: query
+          description: Maximum number of records to retrieve.
+          schema:
+            type: integer
+            example: 100
+        - name: processed
+          in: query
+          description: Set as `true` to retrieve the merged and normalised data processed from raw events records.
+          schema:
+            type: boolean
+            example: true
+        - name: bucket
+          in: query
+          description: S3 bucket name (defaults to S3_BUCKET_NAME)
+          schema:
+            type: string
+            example: S3_BUCKET
+      responses:
+        "200":
+          description: Successfully retrieved ADAGE event data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveResponse'
+        "400":
+          description: Invalid query parameter (borough, source, or limit).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: S3 read failure or internal runtime error.
+
+  /preprocess:
+    post:
+      tags: [Data Preprocessing]
+      summary: Normalises and merges raw event data from S3
+      description: |
+        Preprocesses raw ADAGE 3.0 data from S3 across all collected sources (`nyc_tlc`, `ticketmaster`, `open_meteo`). The raw datasets are validated, normalised, and merged into a single daily `merged` record per borough. The processed output is then stored back to s3.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  type: string
+                  example: S3_BUCKET
+                  description: S3 bucket name (defaults to S3_BUCKET_NAME)
+      responses:
+        "200":
+          description: Successfully preprocessed and merged raw event data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreprocessResponse'
+        "500":
+          description: S3 read/write failure, or validation error, or internal runtime error.
+  /predict:
+    post:
+      tags: [Analytical Model]
+      summary: Predicts Crowd Demand Index for a borough and date range
+      description: |
+        Loads merged historical data from S3, builds a Prophet time-series model with taxi volume, event count, and weather as regressors, and returns a Crowd Demand Index (`0 – 100`) prediction for the requested borough and date range.
+
+        Weighted signals:
+        - NYC taxi trip volume: 50%
+        - Ticketmaster events: 30%
+        - Weather impact: 20%
+
+        If insufficient historical data is available, a fallback prediction of `50.0` is returned with a `warning` status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [borough, start_date, end_date]
+              properties:
+                borough:
+                  type: string
+                  enum: [Manhattan, Brooklyn, Queens, Bronx, Staten Island]
+                  description: Target borough for demand prediction. (Required unless `compare_all_boroughs` is true).
+                  example: Manhattan
+                start_date:
+                  type: string
+                  format: date
+                  description: Start of prediction window(YYYY-MM-DD).
+                  example: "2026-12-24"
+                end_date:
+                  type: string
+                  format: date
+                  example: "2026-12-26"
+                  description: End of prediction window (YYYY-MM-DD).
+                time_of_day:
+                  type: string
+                  description: (Optional) Scales predictions to a specific time frame.
+                  enum: [morning, afternoon, evening, night, all]
+                  default: all
+                event_type:
+                  type: string
+                  description: (Optional) filter by event type.
+                  example: concert
+                compare_all_boroughs:
+                  type: boolean
+                  description: (Optional) If `true` returns predictions for all 5 boroughs. (Mutually exclusive with `borough` field).
+                  default: false
+                bucket:
+                  type: string
+                  description: S3 bucket name (defaults to S3_BUCKET_NAME).
+                  example: S3_BUCKET
+      responses:
+        "200":
+          description: Successfully generated demand predictions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticalResponse'
+        "400":
+          description: Missing required fields or invalid parameter (`borough`, `start_date`, `end_date`, `time_of_day`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: S3 read failure or Prophet model build failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticalModelErrorResponse'
 
 components:
   schemas:
-    Borough:
-      type: string
-      enum: [Manhattan, Brooklyn, Queens, Bronx, "Staten Island"]
+    WeatherEvent:
+      type: object
+      description: Weather forecast record in ADAGE 3.0 data format
+      properties:
+        time_object:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+              example: 2026-04-20T21:35:67Z
+            duration:
+              type: integer
+              example: 1
+            duration_unit:
+              type: string
+              example: hour
+            timezone:
+              type: string
+              example: UTC
+        event_type:
+          type: string
+          example: weather_forecast
+        attribute:
+          type: object
+          properties: 
+            latitude:
+              type: number
+              example: -72
+            longitude:
+              type: number
+              example: 115
+            precipitation_mm:
+              type: number
+              example: 5
+            temperature_c:
+              type: number
+              example: 19
+            precipitation_probability:
+              type: number
+              example: 21
+            demand_modifier:
+              type: number
+              example: 1.05
+            weather_category:
+              type: string
+              example: clear
 
-    TimeOfDay:
-      type: string
-      enum: [morning, afternoon, evening, night, all]
+    CollectionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Weather data collection complete
+        records_collected:
+          type: integer
+          example: 196
+        s3_location:
+          type: string
+          example: s3://S3_BUCKET/weather/raw/weather_forecast.json
 
-    RetrieveSuccess:
+    RetrieveResponse:
       type: object
       required: [status, borough, count, files_read, filters_applied, records]
       properties:
