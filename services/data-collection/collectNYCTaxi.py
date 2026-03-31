@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
-S3_BUCKET   = "rushhour-data"
+S3_BUCKET   = "S3_BUCKET"
 S3_KEY = f"tlc/raw/tlc_trips_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
 # S3_KEY      = "tlc/raw/tlc_trips.json"
 LIMIT       = 1000

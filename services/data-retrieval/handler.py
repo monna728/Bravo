@@ -31,7 +31,7 @@ def lambda_handler(event: dict, context) -> dict:
     borough = params.get("borough")
     limit = params.get("limit")
     processed = params.get("processed")
-    bucket = params.get("bucket", os.environ.get("rushhour-data", "bucket-placeholder"))
+    bucket = params.get("bucket", os.environ.get("S3_BUCKET", "bucket-placeholder"))
 
     if borough and borough not in VALID_BOROUGHS:
         return {

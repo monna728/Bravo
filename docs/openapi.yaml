@@ -177,7 +177,7 @@ paths:
           description: S3 bucket name (defaults to S3_BUCKET_NAME)
           schema:
             type: string
-            example: rushhour-data
+            example: S3_BUCKET
       responses:
         "200":
           description: Successfully retrieved ADAGE event data.
@@ -208,7 +208,7 @@ paths:
               properties:
                 bucket:
                   type: string
-                  example: rushhour-data
+                  example: S3_BUCKET
                   description: S3 bucket name (defaults to S3_BUCKET_NAME)
       responses:
         "200":
@@ -271,7 +271,7 @@ paths:
                 bucket:
                   type: string
                   description: S3 bucket name (defaults to S3_BUCKET_NAME).
-                  example: rushhour-data
+                  example: S3_BUCKET
       responses:
         "200":
           description: Successfully generated demand predictions.
@@ -353,7 +353,7 @@ components:
           example: 196
         s3_location:
           type: string
-          example: s3://rushhour-data/weather/raw/weather_forecast.json
+          example: s3://S3_BUCKET/weather/raw/weather_forecast.json
 
     RetrieveResponse:
       type: object
