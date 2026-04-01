@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import boto3
 import pandas as pd
 
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "bucket-placeholder")
+S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
 MERGED_PREFIX = "processed/merged"
 
 VALID_BOROUGHS = {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}

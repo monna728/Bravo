@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2/events.json"
 API_KEY = os.environ.get("TICKETMASTER_API_KEY", "")
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "bucket-placeholder")
+S3_BUCKET = "rushhour-data"
 S3_KEY_PREFIX = "ticketmaster/raw"
 DEFAULT_CITY = "New York"
 DEFAULT_STATE = "NY"
@@ -209,21 +209,10 @@ def lambda_handler(event: dict, context) -> dict:
         }),
     }
 
-
 if __name__ == "__main__":
-    if not API_KEY:
-        print("Set TICKETMASTER_API_KEY env var first:")
-        print("  $env:TICKETMASTER_API_KEY = 'your-key-here'")
-        exit(1)
+    print("Running local test (simulating Lambda)...")
 
-    raw_response = fetch_events(size=10)
-    total = raw_response.get("page", {}).get("totalElements", 0)
-    events = raw_response.get("_embedded", {}).get("events", [])
-    print(f"Fetched {len(events)} events ({total} total available)")
+    response = lambda_handler(event={}, context=None)
 
-    adage_data = transform_to_adage(raw_response)
-    print(f"Transformed {len(adage_data['events'])} events")
-
-    with open("test_ticketmaster_output.json", "w") as f:
-        json.dump(adage_data, f, indent=2)
-    print("Output saved to test_ticketmaster_output.json")
+    print("Lambda response:")
+    print(json.dumps(response, indent=2))
