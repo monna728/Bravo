@@ -275,5 +275,3 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
     assert len(stored["events"]) == 2
     assert stored["events"][0]["attribute"]["event_name"] == "Madison Square Garden Concert"
     assert stored["events"][0]["event_type"] == "concert"
-
-

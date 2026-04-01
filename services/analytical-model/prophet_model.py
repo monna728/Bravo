@@ -1,4 +1,4 @@
-"""Core prediction engine using Facebook Prophet.
+"""Prediction engine using Facebook Prophet.
 
 Loads merged historical data from S3, builds a Prophet time-series model
 with event count and weather as regressors, and produces a Crowd Demand
