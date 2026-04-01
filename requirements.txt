@@ -11,3 +11,6 @@ jsonschema>=4.21.0
 pytest>=8.0.0
 pytest-cov>=5.0.0
 moto[s3]>=5.0.0
+
+# Docs (openapi.yaml → swagger.json): python docs/generate_swagger_json.py
+PyYAML>=6.0.1

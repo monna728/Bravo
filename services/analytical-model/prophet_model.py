@@ -1,4 +1,4 @@
-"""Core prediction engine using Facebook Prophet.
+"""Prediction engine using Facebook Prophet.
 
 Loads merged historical data from S3, builds a Prophet time-series model
 with event count and weather as regressors, and produces a Crowd Demand
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import boto3
 import pandas as pd
 
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "bucket-placeholder")
+S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
 MERGED_PREFIX = "processed/merged"
 
 VALID_BOROUGHS = {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}
