@@ -15,11 +15,11 @@ from collectWeather import (
     S3_BUCKET,
 )
 
-@pytest.fixture(autouse=True)
-def aws_credentials(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+# @pytest.fixture(autouse=True)
+# def aws_credentials(monkeypatch):
+#     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+#     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+#     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
 
 
 MOCK_OPEN_METEO_RESPONSE = {
@@ -210,3 +210,180 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
     assert len(stored["events"]) == 4
     assert stored["events"][3]["attribute"]["demand_modifier"] == 1.40
     assert stored["events"][0]["attribute"]["weather_category"] == "clear"
+
+# ── Lambda Handler Tests ──────────────────────────────────────────────────────
+
+@mock_aws
+def test_lambda_handler_returns_200(aws_credentials):
+    """lambda_handler returns HTTP 200 on a successful run."""
+    from collectWeather import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_OPEN_METEO_RESPONSE,
+            raise_for_status=lambda: None,
+        )
+        response = lambda_handler(event={}, context=None)
+
+    assert response["statusCode"] == 200
+
+
+@mock_aws
+def test_lambda_handler_body_has_required_fields(aws_credentials):
+    """lambda_handler response body contains message, records_collected, s3_location."""
+    from collectWeather import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_OPEN_METEO_RESPONSE,
+            raise_for_status=lambda: None,
+        )
+        response = lambda_handler(event={}, context=None)
+
+    import json
+    body = json.loads(response["body"])
+    assert "message" in body
+    assert "records_collected" in body
+    assert "s3_location" in body
+    assert body["records_collected"] == 4
+    assert body["s3_location"].startswith(f"s3://{S3_BUCKET}/")
+
+
+@mock_aws
+def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
+    """lambda_handler stores valid ADAGE 3.0 JSON under the weather/raw prefix."""
+    from collectWeather import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_OPEN_METEO_RESPONSE,
+            raise_for_status=lambda: None,
+        )
+        lambda_handler(event={}, context=None)
+
+    import json
+    objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="weather/raw")
+    keys = [obj["Key"] for obj in objects.get("Contents", [])]
+    assert len(keys) >= 1
+
+    stored = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=keys[0])["Body"].read())
+    assert stored["data_source"] == "open_meteo"
+    assert stored["dataset_type"] == "weather_forecast"
+    assert len(stored["events"]) == 4
+
+
+@mock_aws
+def test_lambda_handler_uses_custom_lat_lng(aws_credentials):
+    """lambda_handler passes custom lat/lng from the event dict to the API."""
+    from collectWeather import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_OPEN_METEO_RESPONSE,
+            raise_for_status=lambda: None,
+        )
+        lambda_handler(event={"lat": 51.5074, "lng": -0.1278}, context=None)
+
+    params = mock_get.call_args[1]["params"]
+    assert params["latitude"] == 51.5074
+    assert params["longitude"] == -0.1278
+
+# # ── Lambda Handler Tests ──────────────────────────────────────────────────────
+# # tests the full Lambda entry point end-to-end, completing the
+# # component-level coverage: fetch → transform → S3 → response shape.
+
+# import json
+# import boto3
+# from moto import mock_aws
+# from unittest.mock import patch, MagicMock
+
+# # (These imports already exist in test_collectWeather.py — shown here for clarity)
+# # from collectWeather import lambda_handler, S3_BUCKET, MOCK_OPEN_METEO_RESPONSE
+
+# @mock_aws
+# def test_lambda_handler_returns_200_on_success(aws_credentials):
+#     """Lambda handler completes successfully and returns HTTP 200."""
+#     s3 = boto3.client("s3", region_name="us-east-1")
+#     s3.create_bucket(Bucket=S3_BUCKET)
+
+#     with patch("requests.get") as mock_get:
+#         mock_get.return_value = MagicMock(
+#             json=lambda: MOCK_OPEN_METEO_RESPONSE,
+#             raise_for_status=lambda: None,
+#         )
+#         response = lambda_handler(event={}, context=None)
+
+#     assert response["statusCode"] == 200
+
+
+# @mock_aws
+# def test_lambda_handler_response_body_structure(aws_credentials):
+#     """Lambda handler response body contains expected fields."""
+#     s3 = boto3.client("s3", region_name="us-east-1")
+#     s3.create_bucket(Bucket=S3_BUCKET)
+
+#     with patch("requests.get") as mock_get:
+#         mock_get.return_value = MagicMock(
+#             json=lambda: MOCK_OPEN_METEO_RESPONSE,
+#             raise_for_status=lambda: None,
+#         )
+#         response = lambda_handler(event={}, context=None)
+
+#     body = json.loads(response["body"])
+#     assert "message" in body
+#     assert "records_collected" in body
+#     assert "s3_location" in body
+#     assert body["records_collected"] == 4  # MOCK_OPEN_METEO_RESPONSE has 4 hourly slots
+#     assert body["s3_location"].startswith(f"s3://{S3_BUCKET}/")
+
+
+# @mock_aws
+# def test_lambda_handler_writes_adage_data_to_s3(aws_credentials):
+#     """Lambda handler persists valid ADAGE 3.0 JSON to S3."""
+#     s3 = boto3.client("s3", region_name="us-east-1")
+#     s3.create_bucket(Bucket=S3_BUCKET)
+
+#     with patch("requests.get") as mock_get:
+#         mock_get.return_value = MagicMock(
+#             json=lambda: MOCK_OPEN_METEO_RESPONSE,
+#             raise_for_status=lambda: None,
+#         )
+#         lambda_handler(event={}, context=None)
+
+#     # Verify at least one object was written under the expected prefix
+#     objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="weather/raw")
+#     keys = [obj["Key"] for obj in objects.get("Contents", [])]
+#     assert len(keys) >= 1
+
+#     # Verify the stored data is valid ADAGE 3.0 JSON
+#     stored_data = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=keys[0])["Body"].read())
+#     assert stored_data["data_source"] == "open_meteo"
+#     assert stored_data["dataset_type"] == "weather_forecast"
+#     assert "events" in stored_data
+#     assert len(stored_data["events"]) == 4
+
+
+# @mock_aws
+# def test_lambda_handler_accepts_custom_lat_lng(aws_credentials):
+#     """Lambda handler passes custom lat/lng from the event to the API call."""
+#     s3 = boto3.client("s3", region_name="us-east-1")
+#     s3.create_bucket(Bucket=S3_BUCKET)
+
+#     with patch("requests.get") as mock_get:
+#         mock_get.return_value = MagicMock(
+#             json=lambda: MOCK_OPEN_METEO_RESPONSE,
+#             raise_for_status=lambda: None,
+#         )
+#         lambda_handler(event={"lat": 51.5074, "lng": -0.1278}, context=None)
+
+#     params = mock_get.call_args[1]["params"]
+#     assert params["latitude"] == 51.5074
+#     assert params["longitude"] == -0.1278
