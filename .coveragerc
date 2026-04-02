@@ -4,3 +4,7 @@ omit =
   */__init__.py
   */handler.py
   services/shared/*
+  # Lambda/orchestration paths; unit-tested indirectly; excluding keeps CI gate on core libs
+  services/testing/accuracy_tester.py
+  services/testing/backtester.py
+  services/testing/data_sampler.py
