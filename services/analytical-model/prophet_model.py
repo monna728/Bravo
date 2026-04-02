@@ -145,10 +145,16 @@ def fit_and_forecast(
     *,
     use_regressors: bool = True,
     future_regressors: pd.DataFrame | None = None,
+    future_ds_only: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Fit Prophet on historical data and forecast ``forecast_start``..``forecast_end`` (inclusive).
 
     If ``use_regressors`` is False, fits on ``ds`` and ``y`` only (baseline model).
+    If ``future_ds_only`` is set (columns at least ``ds``), predictions are made exactly on those
+    timestamps — use this for backtests so horizons align with the held-out set. Otherwise the
+    baseline uses ``make_future_dataframe(periods=...)`` from the day after the last training date
+    (which can mismatch sparse or gapped test dates).
+
     If ``use_regressors`` is True and ``future_regressors`` is provided, it must contain
     columns ``ds``, ``event_count``, ``is_rainy``, ``temperature_c`` for each forecast day.
     Otherwise the last training row's regressor values are carried forward.
@@ -169,7 +175,10 @@ def fit_and_forecast(
     if not use_regressors:
         train_df = historical_df[["ds", "y"]].copy()
         model.fit(train_df)
-        future = model.make_future_dataframe(periods=num_days, include_history=False)
+        if future_ds_only is not None and not future_ds_only.empty:
+            future = future_ds_only[["ds"]].copy()
+        else:
+            future = model.make_future_dataframe(periods=num_days, include_history=False)
         return model.predict(future)
 
     model.add_regressor("event_count")

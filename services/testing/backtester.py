@@ -56,8 +56,10 @@ def _predictions_for_test_period(
     hist_y = train_df["y"].tolist()
     tod = get_time_of_day_factor("all")
 
+    test_sorted = test_df.sort_values("ds").reset_index(drop=True)
+
     if use_regressors:
-        future_regs = test_df[["ds", "event_count", "is_rainy", "temperature_c"]].copy()
+        future_regs = test_sorted[["ds", "event_count", "is_rainy", "temperature_c"]].copy()
         forecast = fit_and_forecast(
             train_df,
             forecast_start,
@@ -66,21 +68,29 @@ def _predictions_for_test_period(
             future_regressors=future_regs,
         )
     else:
+        future_ds = test_sorted[["ds"]].copy()
         forecast = fit_and_forecast(
             train_df,
             forecast_start,
             forecast_end,
             use_regressors=False,
+            future_ds_only=future_ds,
         )
 
     forecast = forecast.sort_values("ds").reset_index(drop=True)
-    test_df = test_df.sort_values("ds").reset_index(drop=True)
-    yhat = forecast["yhat"].tolist()
+    fc_y = forecast[["ds", "yhat"]].copy()
+    merged = test_sorted.merge(fc_y, on="ds", how="left")
+    if merged["yhat"].isna().any():
+        missing = int(merged["yhat"].isna().sum())
+        raise ValueError(
+            f"Prophet baseline forecast missing {missing} test date(s); check train/test split and ds alignment."
+        )
+    yhat = merged["yhat"].tolist()
 
     out: list[float] = []
-    for i in range(len(test_df)):
+    for i in range(len(test_sorted)):
         n_mid = normalise_to_index([yhat[i]], hist_y)[0]
-        weather = str(test_df["dominant_weather"].iloc[i])
+        weather = str(test_sorted["dominant_weather"].iloc[i])
         wmult = get_weather_multiplier(weather)
         raw = n_mid * tod * wmult
         adj = max(0.0, min(100.0, round(raw, 1)))
