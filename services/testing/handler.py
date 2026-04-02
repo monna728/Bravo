@@ -159,6 +159,19 @@ def lambda_handler(event: dict, context: Any) -> dict:
             "body": json.dumps({"error": "test_suite must be all, accuracy, edge_cases, or contract"}),
         }
 
+    if test_suite in ("all", "accuracy"):
+        try:
+            check_prophet_runtime()
+        except RuntimeError as exc:
+            return {
+                "statusCode": 503,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": "prophet_runtime_unavailable",
+                    "message": str(exc),
+                }),
+            }
+
     payload = run_tests(bucket=bucket, borough=borough, test_suite=test_suite)
     return {
         "statusCode": 200,
@@ -167,7 +180,67 @@ def lambda_handler(event: dict, context: Any) -> dict:
     }
 
 
+def _prophet_stan_help_text(requirements_path: str, detail: str | None = None) -> str:
+    """Human-readable CmdStan / Python version guidance."""
+    lines = []
+    if detail:
+        lines.append(f"Prophet error: {detail}\n")
+    lines.append(
+        "Prophet needs a working CmdStan backend (cmdstanpy). If every backend fails, you may see:\n"
+        "  AttributeError: 'Prophet' object has no attribute 'stan_backend'\n\n"
+        "Fix (try in order):\n"
+        "  1. python -m pip install -U cmdstanpy\n"
+        "  2. python -c \"import cmdstanpy; cmdstanpy.install_cmdstan()\"\n"
+        "     (needs a C++ toolchain on Windows — see below)\n"
+        "  3. Use Python 3.11 or 3.12 x64 — Prophet 1.1.x is unreliable on Python 3.14+\n"
+        "     (new venv with 3.12, then pip install prophet cmdstanpy).\n\n"
+        "Windows: if install_cmdstan fails with mingw32-make / WinError 2:\n"
+        "  • Install Rtools (CRAN → Rtools for Windows), add its usr\\bin to PATH, open a NEW terminal,\n"
+        "    then run install_cmdstan() again; OR\n"
+        "  • Install MSYS2, run: pacman -S mingw-w64-x86_64-toolchain, add e.g. C:\\msys64\\mingw64\\bin\n"
+        "    to PATH, new terminal, install_cmdstan() again; OR\n"
+        "  • Use WSL2 Ubuntu: sudo apt install build-essential, then pip + install_cmdstan in Linux.\n\n"
+        f"Requirements file: {requirements_path}\n"
+    )
+    return "".join(lines)
+
+
+def check_prophet_runtime() -> None:
+    """Raise ``RuntimeError`` if Prophet (and Stan) cannot initialise."""
+    req = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
+    try:
+        from prophet import Prophet
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing package 'prophet'. Install: python -m pip install prophet\n"
+            f"Or: python -m pip install -r \"{req}\""
+        ) from exc
+
+    try:
+        Prophet(
+            daily_seasonality=False,
+            weekly_seasonality=False,
+            yearly_seasonality=False,
+        )
+    except AttributeError as exc:
+        if "stan_backend" in str(exc):
+            raise RuntimeError(_prophet_stan_help_text(req, detail=str(exc))) from exc
+        raise
+    except Exception as exc:
+        raise RuntimeError(_prophet_stan_help_text(req, detail=str(exc))) from exc
+
+
+def _ensure_prophet_or_exit() -> None:
+    """CLI: print Prophet/CmdStan guidance and exit with code 1 on failure."""
+    try:
+        check_prophet_runtime()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from None
+
+
 def main() -> None:
+    _ensure_prophet_or_exit()
     parser = argparse.ArgumentParser(description="RushHour analytical model testing microservice")
     parser.add_argument("--borough", default=None, help="Single borough (default: all boroughs for backtest)")
     parser.add_argument(

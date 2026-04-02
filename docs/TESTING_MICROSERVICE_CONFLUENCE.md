@@ -62,9 +62,16 @@ The **testing microservice** (`services/testing/`) complements unit tests under 
 **CLI** (from repo root, with `PYTHONPATH` including `services` if needed):
 
 ```bash
+python -m pip install prophet
 python services/testing/handler.py --suite all --bucket your-bucket
 python services/testing/handler.py --borough Manhattan --suite contract
 ```
+
+Install **Prophet** in the same Python environment you use to run the script (`ModuleNotFoundError: prophet` means it is missing). Full pins are in `services/testing/requirements.txt`; on Windows, if `pip install -r` tries to compile pandas from source, install **Prophet** alone after you already have pandas/numpy wheels.
+
+If you see **`AttributeError: ... stan_backend`**, CmdStan did not load: run `python -m pip install -U cmdstanpy` then `python -c "import cmdstanpy; cmdstanpy.install_cmdstan()"`, or use **Python 3.11–3.12** (Prophet 1.1.x is unreliable on **Python 3.14+**).
+
+**Windows:** if `install_cmdstan` fails with **`mingw32-make` / `WinError 2`**, the C++ toolchain is missing. Install **Rtools** from CRAN and add `...\Rtools*\usr\bin` to **PATH** (new terminal), or install **MSYS2** + `mingw-w64-x86_64-toolchain` and add `C:\msys64\mingw64\bin` to PATH, then run `install_cmdstan()` again. Easiest alternative: **WSL2** Ubuntu + `sudo apt install build-essential` and run Python/tests inside WSL.
 
 **Pytest:** `pytest` (includes `services/testing/tests` via `pytest.ini`).
 
