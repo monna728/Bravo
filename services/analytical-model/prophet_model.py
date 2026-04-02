@@ -48,7 +48,7 @@ SIGNAL_WEIGHTS = {
 }
 
 DEFAULT_LOOKBACK_DAYS = 90
-MIN_DATAPOINTS = 2
+MIN_DATAPOINTS = 14
 
 
 def get_weather_multiplier(condition: str) -> float:
@@ -59,6 +59,15 @@ def get_weather_multiplier(condition: str) -> float:
 def get_time_of_day_factor(time_of_day: str) -> float:
     """Return scaling factor for time-of-day period."""
     return TIME_OF_DAY_FACTORS.get(time_of_day.lower(), 1.0) if time_of_day else 1.0
+
+
+def prediction_confidence(lower_bound: float, upper_bound: float, crowd_demand_index: float) -> float:
+    """Map prediction interval width to a 0–1 confidence score (narrower interval → higher)."""
+    _ = crowd_demand_index  # reserved for future calibration
+    lo = min(lower_bound, upper_bound)
+    hi = max(lower_bound, upper_bound)
+    width = hi - lo
+    return round(max(0.0, min(1.0, 1.0 - width / 100.0)), 4)
 
 
 def load_historical_data(
@@ -133,13 +142,22 @@ def fit_and_forecast(
     historical_df: pd.DataFrame,
     forecast_start: str,
     forecast_end: str,
+    *,
+    use_regressors: bool = True,
+    future_regressors: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Fit a Prophet model on historical data and forecast future dates.
+    """Fit Prophet on historical data and forecast ``forecast_start``..``forecast_end`` (inclusive).
 
-    Adds event_count, is_rainy, and temperature_c as regressors.
-    Returns the forecast DataFrame with yhat, yhat_lower, yhat_upper.
+    If ``use_regressors`` is False, fits on ``ds`` and ``y`` only (baseline model).
+    If ``use_regressors`` is True and ``future_regressors`` is provided, it must contain
+    columns ``ds``, ``event_count``, ``is_rainy``, ``temperature_c`` for each forecast day.
+    Otherwise the last training row's regressor values are carried forward.
     """
     from prophet import Prophet
+
+    start_dt = pd.Timestamp(forecast_start)
+    end_dt = pd.Timestamp(forecast_end)
+    num_days = (end_dt - start_dt).days + 1
 
     model = Prophet(
         daily_seasonality=False,
@@ -148,6 +166,12 @@ def fit_and_forecast(
         changepoint_prior_scale=0.05,
     )
 
+    if not use_regressors:
+        train_df = historical_df[["ds", "y"]].copy()
+        model.fit(train_df)
+        future = model.make_future_dataframe(periods=num_days, include_history=False)
+        return model.predict(future)
+
     model.add_regressor("event_count")
     model.add_regressor("is_rainy")
     model.add_regressor("temperature_c")
@@ -155,21 +179,20 @@ def fit_and_forecast(
     train_df = historical_df[["ds", "y", "event_count", "is_rainy", "temperature_c"]].copy()
     model.fit(train_df)
 
-    start_dt = pd.Timestamp(forecast_start)
-    end_dt = pd.Timestamp(forecast_end)
-    num_days = (end_dt - start_dt).days + 1
-    future = model.make_future_dataframe(periods=num_days, include_history=False)
+    if future_regressors is not None:
+        future = future_regressors[
+            ["ds", "event_count", "is_rainy", "temperature_c"]
+        ].copy()
+    else:
+        future = model.make_future_dataframe(periods=num_days, include_history=False)
+        last_event_count = float(historical_df["event_count"].iloc[-1]) if len(historical_df) > 0 else 0.0
+        last_is_rainy = float(historical_df["is_rainy"].iloc[-1]) if len(historical_df) > 0 else 0.0
+        last_temp = float(historical_df["temperature_c"].iloc[-1]) if len(historical_df) > 0 else 15.0
+        future["event_count"] = last_event_count
+        future["is_rainy"] = last_is_rainy
+        future["temperature_c"] = last_temp
 
-    last_event_count = float(historical_df["event_count"].iloc[-1]) if len(historical_df) > 0 else 0.0
-    last_is_rainy = float(historical_df["is_rainy"].iloc[-1]) if len(historical_df) > 0 else 0.0
-    last_temp = float(historical_df["temperature_c"].iloc[-1]) if len(historical_df) > 0 else 15.0
-
-    future["event_count"] = last_event_count
-    future["is_rainy"] = last_is_rainy
-    future["temperature_c"] = last_temp
-
-    forecast = model.predict(future)
-    return forecast
+    return model.predict(future)
 
 
 def normalise_to_index(
@@ -264,7 +287,15 @@ def predict(
             "message": f"Insufficient historical data for {borough} "
                        f"({len(records)} records found, need at least {MIN_DATAPOINTS}). "
                        "Returning estimated prediction.",
-            "predictions": _fallback_predictions(start_date, end_date, time_of_day),
+            "predictions": _fallback_predictions(
+                start_date, end_date, time_of_day,
+                contributing={
+                    "taxi_signal": 0.0,
+                    "event_signal": 0.0,
+                    "weather_impact": 1.0,
+                    "active_events": 0,
+                },
+            ),
             "contributing_factors": {
                 "taxi_signal": 0.0,
                 "event_signal": 0.0,
@@ -281,12 +312,13 @@ def predict(
     historical_df = build_prophet_dataframe(records)
 
     if len(historical_df) < MIN_DATAPOINTS:
+        cf = calculate_contributing_factors(records, historical_df)
         return {
             "status": "warning",
             "borough": borough,
             "message": "Insufficient data after processing. Returning estimated prediction.",
-            "predictions": _fallback_predictions(start_date, end_date, time_of_day),
-            "contributing_factors": calculate_contributing_factors(records, historical_df),
+            "predictions": _fallback_predictions(start_date, end_date, time_of_day, contributing=cf),
+            "contributing_factors": cf,
             "model_info": {
                 "training_days": len(historical_df),
                 "borough": borough,
@@ -297,12 +329,13 @@ def predict(
     try:
         forecast = fit_and_forecast(historical_df, start_date, end_date)
     except Exception as e:
+        cf = calculate_contributing_factors(records, historical_df)
         return {
             "status": "error",
             "borough": borough,
             "message": f"Prophet model fitting failed: {str(e)}",
-            "predictions": _fallback_predictions(start_date, end_date, time_of_day),
-            "contributing_factors": calculate_contributing_factors(records, historical_df),
+            "predictions": _fallback_predictions(start_date, end_date, time_of_day, contributing=cf),
+            "contributing_factors": cf,
             "model_info": {
                 "training_days": len(historical_df),
                 "borough": borough,
@@ -324,6 +357,9 @@ def predict(
     last_weather = records[-1].get("dominant_weather", "clear") if records else "clear"
     weather_mult = get_weather_multiplier(last_weather)
 
+    contributing = calculate_contributing_factors(records, historical_df)
+    cf_row = {k: contributing[k] for k in contributing}
+
     predictions = []
     for i, date_str in enumerate(forecast_dates):
         raw_score = normalised_scores[i]
@@ -332,18 +368,19 @@ def predict(
 
         lower = max(0.0, min(100.0, round(normalised_lower[i] * tod_factor * weather_mult, 1)))
         upper = max(0.0, min(100.0, round(normalised_upper[i] * tod_factor * weather_mult, 1)))
+        conf = prediction_confidence(lower, upper, adjusted)
 
         predictions.append({
             "date": date_str,
-            "demand_index": adjusted,
-            "confidence_lower": lower,
-            "confidence_upper": upper,
+            "crowd_demand_index": adjusted,
+            "lower_bound": lower,
+            "upper_bound": upper,
+            "confidence": conf,
+            "contributing_factors": dict(cf_row),
             "time_of_day": time_of_day,
             "weather_condition": last_weather,
             "weather_multiplier": weather_mult,
         })
-
-    contributing = calculate_contributing_factors(records, historical_df)
 
     return {
         "status": "success",
@@ -362,19 +399,29 @@ def _fallback_predictions(
     start_date: str,
     end_date: str,
     time_of_day: str,
+    contributing: dict | None = None,
 ) -> list[dict]:
     """Generate placeholder predictions when the model can't run."""
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
     predictions = []
+    cf = contributing or {
+        "taxi_signal": 0.0,
+        "event_signal": 0.0,
+        "weather_impact": 1.0,
+        "active_events": 0,
+    }
 
     current = start
     while current <= end:
+        lo, hi, mid = 30.0, 70.0, 50.0
         predictions.append({
             "date": current.strftime("%Y-%m-%d"),
-            "demand_index": 50.0,
-            "confidence_lower": 30.0,
-            "confidence_upper": 70.0,
+            "crowd_demand_index": mid,
+            "lower_bound": lo,
+            "upper_bound": hi,
+            "confidence": prediction_confidence(lo, hi, mid),
+            "contributing_factors": dict(cf),
             "time_of_day": time_of_day,
             "weather_condition": "unknown",
             "weather_multiplier": 1.0,

@@ -1,0 +1,15 @@
+# Copy into your Lambda / API Gateway Terraform when those resources exist.
+#
+# Lambda (aws_lambda_function):
+#   tracing_config {
+#     mode = "Active"
+#   }
+#
+# IAM: attach to the Lambda execution role
+#   resource "aws_iam_role_policy_attachment" "lambda_xray" {
+#     role       = aws_iam_role.lambda_exec.name
+#     policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+#   }
+#
+# API Gateway REST stage (aws_api_gateway_stage):
+#   xray_tracing_enabled = true

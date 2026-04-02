@@ -11,10 +11,15 @@ Query params: source, start_date, end_date, event_type, borough, limit, processe
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from s3_reader import retrieve, SOURCE_PREFIXES, VALID_BOROUGHS
+
+_SERVICE = "data-retrieval"
 
 
 def lambda_handler(event: dict, context) -> dict:
@@ -23,6 +28,7 @@ def lambda_handler(event: dict, context) -> dict:
     Expects query parameters via event["queryStringParameters"] (API Gateway)
     or directly in the event dict (direct invocation).
     """
+    t0 = time.perf_counter()
     params = event.get("queryStringParameters") or event
     source = params.get("source", "all")
     start_date = params.get("start_date")
@@ -34,6 +40,10 @@ def lambda_handler(event: dict, context) -> dict:
     bucket = params.get("bucket", os.environ.get("rushhour-data", "bucket-placeholder"))
 
     if borough and borough not in VALID_BOROUGHS:
+        log_event(
+            _SERVICE, "validation failed: invalid borough", level="ERROR", context=context, event=event,
+            duration_ms=(time.perf_counter() - t0) * 1000, borough=borough,
+        )
         return {
             "statusCode": 400,
             "headers": {"Content-Type": "application/json"},
@@ -45,6 +55,10 @@ def lambda_handler(event: dict, context) -> dict:
         }
 
     if source not in SOURCE_PREFIXES and source != "all":
+        log_event(
+            _SERVICE, "validation failed: unknown source", level="ERROR", context=context, event=event,
+            duration_ms=(time.perf_counter() - t0) * 1000, source=source,
+        )
         return {
             "statusCode": 400,
             "headers": {"Content-Type": "application/json"},
@@ -59,6 +73,10 @@ def lambda_handler(event: dict, context) -> dict:
         try:
             limit = int(limit)
         except ValueError:
+            log_event(
+                _SERVICE, "validation failed: limit not integer", level="ERROR", context=context, event=event,
+                duration_ms=(time.perf_counter() - t0) * 1000,
+            )
             return {
                 "statusCode": 400,
                 "headers": {"Content-Type": "application/json"},
@@ -79,11 +97,26 @@ def lambda_handler(event: dict, context) -> dict:
             limit=limit,
         )
     except Exception as e:
+        log_event(
+            _SERVICE, "retrieve failed", level="ERROR", context=context, event=event,
+            duration_ms=(time.perf_counter() - t0) * 1000, error_type=type(e).__name__,
+        )
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({"status": "error", "error": str(e)}),
         }
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log_event(
+        _SERVICE, "retrieve ok", context=context, event=event, duration_ms=elapsed_ms,
+        source=source, borough=borough or "all", record_count=result.get("count", 0),
+    )
+    emit_embedded_metric(
+        "Bravo",
+        {"RecordsRetrieved": float(result.get("count", 0))},
+        {"Service": "data-retrieval", "Environment": deployment_env()},
+    )
 
     return {
         "statusCode": 200,

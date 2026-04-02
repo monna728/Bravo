@@ -1,8 +1,13 @@
 import json
 import os
+import sys
+import time
 import boto3
 import requests
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
 TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2/events.json"
 API_KEY = os.environ.get("TICKETMASTER_API_KEY", "")
@@ -170,6 +175,8 @@ def save_to_s3(data: dict, bucket: str, key: str) -> None:
 
 def lambda_handler(event: dict, context) -> dict:
     """AWS Lambda entry point for Ticketmaster data collection."""
+    t0 = time.perf_counter()
+    log_event("collect-ticketmaster", "collection started", context=context, event=event or {})
     city = event.get("city", DEFAULT_CITY)
     state_code = event.get("state_code", DEFAULT_STATE)
     country_code = event.get("country_code", DEFAULT_COUNTRY)
@@ -177,33 +184,52 @@ def lambda_handler(event: dict, context) -> dict:
     end_date = event.get("end_date")
     classification = event.get("classification")
 
-    raw_response = fetch_events(
-        city=city,
-        state_code=state_code,
-        country_code=country_code,
-        start_date=start_date,
-        end_date=end_date,
-        classification=classification,
+    try:
+        raw_response = fetch_events(
+            city=city,
+            state_code=state_code,
+            country_code=country_code,
+            start_date=start_date,
+            end_date=end_date,
+            classification=classification,
+        )
+
+        total = raw_response.get("page", {}).get("totalElements", 0)
+        print(f"Fetched page with {total} total events from Ticketmaster for {city}")
+
+        adage_data = transform_to_adage(raw_response, city=city)
+        print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
+
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        s3_key = f"{S3_KEY_PREFIX}/{date_str}/events_{city}_{timestamp}.json"
+
+        save_to_s3(adage_data, S3_BUCKET, s3_key)
+    except Exception as e:
+        log_event(
+            "collect-ticketmaster", "collection failed", level="ERROR", context=context, event=event or {},
+            duration_ms=(time.perf_counter() - t0) * 1000, error_type=type(e).__name__,
+        )
+        raise
+
+    n = len(adage_data["events"])
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log_event(
+        "collect-ticketmaster", "collection complete", context=context, event=event or {},
+        duration_ms=elapsed_ms, records_collected=n, s3_key=s3_key, city=city,
     )
-
-    total = raw_response.get("page", {}).get("totalElements", 0)
-    print(f"Fetched page with {total} total events from Ticketmaster for {city}")
-
-    adage_data = transform_to_adage(raw_response, city=city)
-    print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
-
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    s3_key = f"{S3_KEY_PREFIX}/{date_str}/events_{city}_{timestamp}.json"
-
-    save_to_s3(adage_data, S3_BUCKET, s3_key)
+    emit_embedded_metric(
+        "Bravo",
+        {"RecordsCollected": float(n)},
+        {"Service": "collect-ticketmaster", "Environment": deployment_env()},
+    )
 
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps({
             "message": "Ticketmaster data collection complete",
-            "records_collected": len(adage_data["events"]),
+            "records_collected": n,
             "total_available": total,
             "s3_location": f"s3://{S3_BUCKET}/{s3_key}",
         }),

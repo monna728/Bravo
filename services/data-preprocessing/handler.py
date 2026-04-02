@@ -9,6 +9,7 @@ Endpoint: POST /preprocess
 import json
 import os
 import boto3
+import time
 from datetime import datetime, timezone
 
 import sys
@@ -16,6 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.adage_validator import validate_adage3
+from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from normaliser import normalise_ticketmaster, normalise_nyc_taxi, normalise_weather
 from merger import merge_by_date, merged_to_adage
 
@@ -124,12 +126,29 @@ def preprocess(bucket: str = S3_BUCKET) -> dict:
 
 def lambda_handler(event: dict, context) -> dict:
     """AWS Lambda entry point for preprocessing."""
-    print("Starting data preprocessing...")
+    t0 = time.perf_counter()
+    log_event("data-preprocessing", "preprocess started", context=context, event=event)
 
     bucket = event.get("bucket", S3_BUCKET)
-    result = preprocess(bucket=bucket)
+    try:
+        result = preprocess(bucket=bucket)
+    except Exception as e:
+        log_event(
+            "data-preprocessing", "preprocess failed", level="ERROR", context=context, event=event,
+            duration_ms=(time.perf_counter() - t0) * 1000, error_type=type(e).__name__,
+        )
+        raise
 
-    print(f"Preprocessing complete: {result['merged_records']} daily records merged")
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log_event(
+        "data-preprocessing", "preprocess complete", context=context, event=event,
+        duration_ms=elapsed_ms, merged_records=result["merged_records"], s3_key=result["s3_key"],
+    )
+    emit_embedded_metric(
+        "Bravo",
+        {"MergedRecordCount": float(result["merged_records"])},
+        {"Service": "data-preprocessing", "Environment": deployment_env()},
+    )
 
     return {
         "statusCode": 200,
