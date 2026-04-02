@@ -1,0 +1,103 @@
+name: Data Collection — Tests & Coverage Report
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Run data-collection microservice tests
+    runs-on: ubuntu-latest
+
+    env:
+      # Fake AWS credentials — moto intercepts all boto3 calls,
+      # so these never reach real AWS during the test run.
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+
+      # Ticketmaster collector reads this at import time
+      TICKETMASTER_API_KEY: test-api-key
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ──────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. Run tests with coverage ───────────────────────────────────────
+      # --cov-report=term-missing  → visible in Actions log for debugging
+      # --cov-report=html          → downloadable HTML artefact
+      # --cov-report=xml           → machine-readable for tools like Codecov
+      # --junitxml                 → test result artefact (pass/fail per test)
+      # -v                         → verbose: each test name printed
+      # Fails the step (and therefore the pipeline) if any test fails.
+      - name: Run tests with coverage
+        run: |
+          pytest tests/test_collectWeather.py \
+                 tests/test_collectNYCTaxi.py \
+                 tests/test_collectTicketmaster.py \
+                 --cov=services/data-collection \
+                 --cov-report=term-missing \
+                 --cov-report=html:reports/coverage-html \
+                 --cov-report=xml:reports/coverage.xml \
+                 --junitxml=reports/test-results.xml \
+                 -v 2>&1 | tee reports/test-output.txt
+
+      # ── 5. Upload test report artefacts ──────────────────────────────────
+      # These are available as downloadable zip files on the Actions run page.
+      # retention-days: 30 keeps them for a month, matching typical sprint cycles.
+      - name: Upload HTML coverage report
+        if: always()   # upload even if tests fail, so you can diagnose failures
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-html
+          path: reports/coverage-html/
+          retention-days: 30
+
+      - name: Upload JUnit XML test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-junit
+          path: reports/test-results.xml
+          retention-days: 30
+
+      - name: Upload raw test output log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-log
+          path: reports/test-output.txt
+          retention-days: 30
+
+      - name: Upload XML coverage (for Codecov or CI tools)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: reports/coverage.xml
+          retention-days: 30
+
+      # ── 6. Print coverage summary to Actions log ─────────────────────────
+      - name: Print coverage summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "  COVERAGE SUMMARY — data-collection"
+          echo "=========================================="
+          python -m coverage report --rcfile=.coveragerc || true
