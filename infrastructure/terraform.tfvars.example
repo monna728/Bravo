@@ -1,0 +1,15 @@
+aws_region = "us-east-1"
+
+# Match your deployed function names exactly.
+lambda_function_names = [
+  "bravo-data-retrieval",
+  "bravo-data-preprocessing",
+  "bravo-analytical-model",
+  "bravo-collect-ticketmaster",
+]
+
+# From API Gateway → APIs → Settings → API name. Leave "" to omit API widgets.
+api_gateway_api_name   = "bravo-api"
+api_gateway_stage_name = "staging"
+
+dashboard_name = "Bravo-Staging"

@@ -440,9 +440,12 @@ components:
       type: object
       properties:
         date: { type: string, format: date }
-        demand_index: { type: number }
-        confidence_lower: { type: number }
-        confidence_upper: { type: number }
+        crowd_demand_index: { type: number }
+        lower_bound: { type: number }
+        upper_bound: { type: number }
+        confidence: { type: number, description: "0–1 derived from prediction interval width" }
+        contributing_factors:
+          $ref: "#/components/schemas/ContributingFactors"
         time_of_day: { type: string }
         weather_condition: { type: string }
         weather_multiplier: { type: number }
