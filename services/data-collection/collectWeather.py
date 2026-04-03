@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
-S3_BUCKET      = "rushhour-data"
+S3_BUCKET      = "S3_BUCKET"
 # S3_KEY = f"weather/raw/weather_forecast_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
 S3_KEY         = "weather/raw/weather_forecast.json"
 # NYC coordinates (Midtown Manhattan)
