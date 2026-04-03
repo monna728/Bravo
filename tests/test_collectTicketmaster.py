@@ -1,6 +1,7 @@
 import json
 import pytest
 import boto3
+import uuid
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
 
