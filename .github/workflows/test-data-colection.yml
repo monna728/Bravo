@@ -1,0 +1,157 @@
+name: Data Collection — Tests & Coverage Report
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Run data-collection microservice tests
+    runs-on: ubuntu-latest
+
+    env:
+      # Fake AWS credentials — moto intercepts all boto3 calls,
+      # so these never reach real AWS during the test run.
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+
+      # Ticketmaster collector reads this at import time
+      TICKETMASTER_API_KEY: test-api-key
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ──────────────────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. Install PDF generation dependencies ───────────────────────────
+      # weasyprint converts HTML to PDF. Its system dependencies (pango, cairo) are
+      # needed on Ubuntu for font rendering.
+      - name: Install PDF generation dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
+          pip install weasyprint
+
+      # ── 5. Run tests with coverage ───────────────────────────────────────
+      # --cov-report=term-missing
+      # --cov-report=html 
+      # --cov-report=xml
+      # --junitxml 
+      # -v 
+      # Fails the step (and therefore the pipeline) if any test fails.
+      - name: Run tests with coverage
+        run: |
+          mkdir -p reports
+          pytest tests/test_collectWeather.py \
+                 tests/test_collectNYCTaxi.py \
+                 tests/test_collectTicketmaster.py \
+                 --cov=services/data-collection \
+                 --cov-report=term-missing \
+                 --cov-report=html:reports/coverage-html \
+                 --cov-report=xml:reports/coverage.xml \
+                 --junitxml=reports/test-results.xml \
+                 -v 2>&1 | tee reports/test-output.txt
+
+      # ── 6. Generate PDF report ────────────────────────────────────────────
+      # converts the HTML coverage report to a single PDF using weasyprint giving a downloadable failure report as well
+      - name: Generate PDF test report
+        if: always()
+        run: |
+          python - <<'EOF'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          html_index = Path("reports/coverage-html/index.html")
+          pdf_out    = Path("reports/test-report.pdf")
+
+          if not html_index.exists():
+              # If pytest failed before producing HTML, build a minimal HTML page
+              # from the raw text log so there is still something to convert.
+              print("No HTML report found — writing a plain-text PDF fallback.")
+              log = Path("reports/test-output.txt")
+              log_text = log.read_text() if log.exists() else "No test output captured."
+              html_index.parent.mkdir(parents=True, exist_ok=True)
+              html_index.write_text(
+                  f"<html><body><pre>{log_text}</pre></body></html>",
+                  encoding="utf-8",
+              )
+
+          result = subprocess.run(
+              [sys.executable, "-m", "weasyprint",
+               str(html_index), str(pdf_out)],
+              capture_output=True, text=True,
+          )
+          if result.returncode != 0:
+              print("weasyprint stderr:", result.stderr)
+              sys.exit(result.returncode)
+
+          size_kb = pdf_out.stat().st_size // 1024
+          print(f"PDF report generated: {pdf_out} ({size_kb} KB)")
+          EOF
+
+      # ── 7. Upload test report artefacts ──────────────────────────────────
+      - name: Upload PDF test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-pdf
+          path: reports/test-report.pdf
+          retention-days: 30
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-html
+          path: reports/coverage-html/
+          retention-days: 30
+
+      - name: Upload JUnit XML test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-junit
+          path: reports/test-results.xml
+          retention-days: 30
+
+      - name: Upload raw test output log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-log
+          path: reports/test-output.txt
+          retention-days: 30
+
+      - name: Upload XML coverage (for Codecov or CI tools)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: reports/coverage.xml
+          retention-days: 30
+
+      # ── 8. Print coverage summary to Actions log ─────────────────────────
+      - name: Print coverage summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "  COVERAGE SUMMARY — data-collection"
+          echo "=========================================="
+          python -m coverage report --rcfile=.coveragerc || true

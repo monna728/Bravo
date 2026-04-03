@@ -10,7 +10,7 @@ import os
 import boto3
 from datetime import datetime
 
-S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
+S3_BUCKET = os.environ.get("S3_BUCKET", "rushhour-data")
 
 VALID_BOROUGHS = {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}
 
