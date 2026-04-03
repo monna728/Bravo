@@ -395,6 +395,7 @@ def define(
 
         We also ensure that frozen-ness of classes is inherited.
         """
+        nonlocal on_setattr
 
         had_on_setattr = on_setattr not in (None, setters.NO_OP)
 
