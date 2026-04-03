@@ -6,6 +6,8 @@ python-dotenv>=1.0.0
 # Data processing
 pandas>=2.2.0
 jsonschema>=4.21.0
+referencing>=0.30.0
+rpds-py>=0.18.0
 
 # Testing
 pytest>=8.0.0
