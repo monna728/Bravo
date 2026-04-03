@@ -315,14 +315,14 @@ def test_fallback_single_day():
     preds = _fallback_predictions("2026-04-15", "2026-04-15", "all")
     assert len(preds) == 1
     assert preds[0]["date"] == "2026-04-15"
-    assert preds[0]["demand_index"] == 50.0
+    assert preds[0]["crowd_demand_index"] == 50.0
 
 
 def test_fallback_multi_day():
     preds = _fallback_predictions("2026-04-15", "2026-04-17", "evening")
     assert len(preds) == 3
     for p in preds:
-        assert p["demand_index"] == 50.0
+        assert p["crowd_demand_index"] == 50.0
         assert p["time_of_day"] == "evening"
         assert p["weather_condition"] == "unknown"
 
@@ -429,7 +429,7 @@ def test_predict_success_with_mocked_prophet(mock_forecast, aws_credentials):
     assert result["status"] == "success"
     assert result["borough"] == "Manhattan"
     assert len(result["predictions"]) == 2
-    assert "demand_index" in result["predictions"][0]
+    assert "crowd_demand_index" in result["predictions"][0]
     assert "contributing_factors" in result
     assert "model_info" in result
 
@@ -457,8 +457,8 @@ def test_predict_evening_applies_tod_factor(mock_forecast, aws_credentials):
     result_eve = predict(borough="Brooklyn", start_date="2026-04-15",
                          end_date="2026-04-15", time_of_day="evening", bucket=BUCKET)
 
-    score_all = result_all["predictions"][0]["demand_index"]
-    score_eve = result_eve["predictions"][0]["demand_index"]
+    score_all = result_all["predictions"][0]["crowd_demand_index"]
+    score_eve = result_eve["predictions"][0]["crowd_demand_index"]
     assert score_eve >= score_all
 
 
@@ -491,9 +491,11 @@ def test_predict_response_shape(mock_forecast, aws_credentials):
 
     pred = result["predictions"][0]
     assert "date" in pred
-    assert "demand_index" in pred
-    assert "confidence_lower" in pred
-    assert "confidence_upper" in pred
+    assert "crowd_demand_index" in pred
+    assert "lower_bound" in pred
+    assert "upper_bound" in pred
+    assert "confidence" in pred
+    assert "contributing_factors" in pred
     assert "time_of_day" in pred
     assert "weather_condition" in pred
     assert "weather_multiplier" in pred
@@ -526,8 +528,8 @@ def test_predict_demand_index_clamped_0_100(mock_forecast, aws_credentials):
     result = predict(borough="Bronx", start_date="2026-04-15",
                      end_date="2026-04-15", bucket=BUCKET)
 
-    assert result["predictions"][0]["demand_index"] <= 100.0
-    assert result["predictions"][0]["demand_index"] >= 0.0
+    assert result["predictions"][0]["crowd_demand_index"] <= 100.0
+    assert result["predictions"][0]["crowd_demand_index"] >= 0.0
 
 
 @mock_aws
@@ -549,7 +551,7 @@ def test_predict_prophet_error_returns_fallback(mock_forecast, aws_credentials):
     assert result["status"] == "error"
     assert "Prophet" in result["message"]
     assert len(result["predictions"]) == 1
-    assert result["predictions"][0]["demand_index"] == 50.0
+    assert result["predictions"][0]["crowd_demand_index"] == 50.0
 
 
 # ── Handler Validation ──────────────────────────────────────────────────────
@@ -645,7 +647,7 @@ def test_handler_compare_all_boroughs(mock_forecast, aws_credentials):
 
     all_records = []
     for borough in VALID_BOROUGHS:
-        all_records.extend(_generate_daily_records(borough, 10, "2026-01-01"))
+        all_records.extend(_generate_daily_records(borough, 20, "2026-01-01"))
     adage = _make_merged_adage(all_records)
     s3.put_object(Bucket=BUCKET, Key="processed/merged/test.json",
                   Body=json.dumps(adage), ContentType="application/json")

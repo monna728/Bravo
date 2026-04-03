@@ -3,11 +3,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <title>Predictive Demand Intelligence API</title>
+    <title>Event Intelligence Application API — Swagger UI</title>
     <link rel="stylesheet" type="text/css" href="./swagger-ui.css" />
   </head>
 
   <body>
+    <!-- Spec: openapi.yaml. Use a local HTTP server (file:// often blocks loading the YAML):
+         Repo root:  python -m http.server 8080 --bind 127.0.0.1
+                     → http://127.0.0.1:8080/docs/index.html
+         Or cd docs: python -m http.server 8080 --bind 127.0.0.1
+                     → http://127.0.0.1:8080/index.html -->
     <div id="swagger-ui"></div>
     <script src="./swagger-ui-bundle.js" charset="UTF-8"> </script>
     <script src="./swagger-ui-standalone-preset.js" charset="UTF-8"> </script>

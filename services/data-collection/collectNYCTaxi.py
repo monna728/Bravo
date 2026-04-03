@@ -1,7 +1,13 @@
 import json
+import os
+import sys
+import time
 import boto3
 import requests
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
@@ -98,7 +104,9 @@ def save_to_s3(data: dict, bucket: str, key: str):
 
 
 def lambda_handler(event, context):
-    print("Starting TLC data collection...")
+    t0 = time.perf_counter()
+    ev = event if isinstance(event, dict) else {}
+    log_event("collect-nyc-tlc", "collection started", context=context, event=ev)
 
     raw_records = fetch_tlc_data(limit=LIMIT)
     print(f"Fetched {len(raw_records)} records from NYC TLC API")
@@ -106,19 +114,34 @@ def lambda_handler(event, context):
     adage_data = transform_to_adage(raw_records)
     print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
 
-
     try:
-        # check
         print(f"Attempting to save {len(adage_data['events'])} events to s3://{S3_BUCKET}/{S3_KEY}")
         save_to_s3(adage_data, S3_BUCKET, S3_KEY)
     except Exception as e:
+        log_event(
+            "collect-nyc-tlc", "s3 save failed", level="ERROR", context=context, event=ev,
+            duration_ms=(time.perf_counter() - t0) * 1000, error_type=type(e).__name__,
+        )
         print("Failed to save to S3:", e)
+        raise
+
+    n = len(adage_data["events"])
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log_event(
+        "collect-nyc-tlc", "collection complete", context=context, event=ev,
+        duration_ms=elapsed_ms, records_collected=n, s3_key=S3_KEY,
+    )
+    emit_embedded_metric(
+        "Bravo",
+        {"RecordsCollected": float(n)},
+        {"Service": "collect-nyc-tlc", "Environment": deployment_env()},
+    )
 
     return {
         "statusCode": 200,
         "body": json.dumps({
             "message": "Data collection complete",
-            "records_collected": len(adage_data["events"]),
+            "records_collected": n,
             "s3_location": f"s3://{S3_BUCKET}/{S3_KEY}"
         })
     }

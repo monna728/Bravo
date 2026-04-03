@@ -4,3 +4,18 @@ omit =
   */__init__.py
   */handler.py
   services/shared/*
+  # Lambda/orchestration paths; unit-tested indirectly; excluding keeps CI gate on core libs
+  services/testing/accuracy_tester.py
+  services/testing/backtester.py
+  services/testing/data_sampler.py
+
+[report]
+show_missing = True
+fail_under = 80
+
+[html]
+directory = reports/coverage-html
+title = Bravo - Data Collection Microservice Coverage Report
+
+[xml]
+output = reports/coverage.xml

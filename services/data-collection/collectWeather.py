@@ -1,7 +1,13 @@
 import json
+import os
+import sys
+import time
 import boto3
 import requests
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
 OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
 S3_BUCKET      = "S3_BUCKET"
@@ -127,10 +133,12 @@ def save_to_s3(data: dict, bucket: str, key: str):
 
 
 def lambda_handler(event, context):
-    print("Starting weather data collection...")
+    t0 = time.perf_counter()
+    ev = event if isinstance(event, dict) else {}
+    log_event("collect-weather", "collection started", context=context, event=ev)
 
-    lat = event.get("lat", DEFAULT_LAT)
-    lng = event.get("lng", DEFAULT_LNG)
+    lat = ev.get("lat", DEFAULT_LAT)
+    lng = ev.get("lng", DEFAULT_LNG)
 
     raw_response = fetch_weather_data(lat=lat, lng=lng)
     print(f"Fetched {len(raw_response.get('hourly', {}).get('time', []))} hourly records from Open-Meteo")
@@ -138,13 +146,32 @@ def lambda_handler(event, context):
     adage_data = transform_to_adage(raw_response, lat=lat, lng=lng)
     print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
 
-    save_to_s3(adage_data, S3_BUCKET, S3_KEY)
+    try:
+        save_to_s3(adage_data, S3_BUCKET, S3_KEY)
+    except Exception as e:
+        log_event(
+            "collect-weather", "s3 save failed", level="ERROR", context=context, event=ev,
+            duration_ms=(time.perf_counter() - t0) * 1000, error_type=type(e).__name__,
+        )
+        raise
+
+    n = len(adage_data["events"])
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log_event(
+        "collect-weather", "collection complete", context=context, event=ev,
+        duration_ms=elapsed_ms, records_collected=n, s3_key=S3_KEY,
+    )
+    emit_embedded_metric(
+        "Bravo",
+        {"RecordsCollected": float(n)},
+        {"Service": "collect-weather", "Environment": deployment_env()},
+    )
 
     return {
         "statusCode": 200,
         "body": json.dumps({
             "message":           "Weather data collection complete",
-            "records_collected": len(adage_data["events"]),
+            "records_collected": n,
             "s3_location":       f"s3://{S3_BUCKET}/{S3_KEY}"
         })
     }

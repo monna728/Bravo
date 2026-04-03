@@ -6,6 +6,9 @@ window.onload = function() {
     url: "./openapi.yaml",
     dom_id: '#swagger-ui',
     deepLinking: true,
+    // Avoid online validator (works offline; use when serving over file:// or local server)
+    validatorUrl: null,
+    docExpansion: "list",
     presets: [
       SwaggerUIBundle.presets.apis,
       SwaggerUIStandalonePreset

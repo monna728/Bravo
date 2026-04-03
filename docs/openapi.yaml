@@ -1,55 +1,238 @@
-openapi: 3.0.0
-servers: []
+openapi: 3.0.3
 info:
-  title: Predictive Demand Intelligence API
+  title: Event Intelligence Application API
   description: |
-    A REST API that collects, retrieves, and preprocesses data from event sources, and predicts the supply-demand imbalance before it occurs as a Crowd Demand Index (`0 – 100`).
+    OpenAPI description of the Bravo microservice Lambdas as implemented in this repository.
 
-    **Company:** RushHour
-    
-    **Team:** TEAM W13A_BRAVO
-  version: "1.0.0"
-# servers:
-  # - url:
+    **HTTP mapping:** API Gateway route names (`/retrieve`, `/preprocess`, `/predict`, collection routes)
+    are the intended REST shape from the course spec. Each operation maps to one `lambda_handler`
+    in `services/`. Actual API Gateway base URL and stage prefix are deployment-specific.
+
+    **Response bodies:** Lambda handlers return API Gateway proxy objects with `statusCode`,
+    `headers`, and stringified JSON in `body`. This document describes the JSON **after** parsing
+    `body` (what HTTP clients receive as the response payload).
+  version: 1.0.0
+  contact:
+    name: Team Bravo
+
+servers:
+  - url: https://api.example.com
+    description: Replace with your API Gateway invoke URL after deployment
+
 tags:
-  - name: Data Collection
-  - name: Data Retrieval
-  - name: Data Preprocessing
-  - name: Analytical Model
+  - name: DataRetrieval
+    description: |
+      `services/data-retrieval/handler.py` — reads ADAGE JSON from S3; never writes.
+  - name: DataPreprocessing
+    description: |
+      `services/data-preprocessing/handler.py` — validates raw ADAGE, normalises, merges
+      to per-borough daily records, writes merged ADAGE to S3.
+  - name: AnalyticalModel
+    description: |
+      `services/analytical-model/handler.py` — Crowd Demand Index (0–100) via Prophet.
+  - name: DataCollection
+    description: |
+      Three separate Lambdas in `services/data-collection/` (no single `/collect` router in code).
+      Event payload keys are read from the Lambda `event` dict (JSON body if API Gateway maps it).
+
 paths:
-  /collect/taxi:
+  /retrieve:
+    get:
+      tags: [DataRetrieval]
+      summary: Retrieve filtered ADAGE records from S3
+      operationId: retrieveData
+      parameters:
+        - name: source
+          in: query
+          description: |
+            S3 prefix group. `processed=true` is equivalent to `source=merged` (handler rewrites).
+          schema:
+            type: string
+            enum: [ticketmaster, nyc_tlc, open_meteo, merged, all]
+            default: all
+        - name: start_date
+          in: query
+          description: Filter events on extracted calendar date (YYYY-MM-DD), inclusive lower bound.
+          schema:
+            type: string
+            format: date
+            example: "2026-04-15"
+        - name: end_date
+          in: query
+          description: Inclusive upper bound on extracted event date.
+          schema:
+            type: string
+            format: date
+        - name: event_type
+          in: query
+          description: Exact match on ADAGE `event_type` field.
+          schema:
+            type: string
+        - name: borough
+          in: query
+          description: |
+            One of five NYC boroughs. Merged records use `attribute.borough` (legacy `top_borough` /
+            `pickup_borough` also supported in filter).
+          schema:
+            $ref: "#/components/schemas/Borough"
+        - name: limit
+          in: query
+          description: Max number of events returned after filtering (integer).
+          schema:
+            type: integer
+            minimum: 1
+        - name: processed
+          in: query
+          description: If `true`, forces `source=merged` (processed merged data).
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - name: bucket
+          in: query
+          description: Overrides S3 bucket; defaults to `S3_BUCKET_NAME` env var.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success — parsed `body` from Lambda.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetrieveSuccess"
+              example:
+                status: success
+                borough: Manhattan
+                count: 2
+                files_read: 1
+                filters_applied:
+                  source: merged
+                  start_date: "2026-04-15"
+                  end_date: "2026-04-16"
+                  event_type: null
+                  borough: Manhattan
+                  limit: null
+                records: []
+        "400":
+          description: Invalid borough, unknown source, or non-integer `limit`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetrieveError"
+        "500":
+          description: Unhandled exception from `retrieve()`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericError"
+
+  /preprocess:
     post:
-      tags: [Data Collection]
-      summary: Collects NYC taxi trip event data
+      tags: [DataPreprocessing]
+      summary: Run preprocessing pipeline on raw S3 data
+      operationId: preprocessData
       description: |
-        Scraps the latest NYC taxi trips from NYC TLC API, and stores the raw data in S3 using the ADAGE 3.0 format.
+        Reads all `.json` under `ticketmaster/raw`, `tlc/raw`, `weather/raw`; validates with
+        `validate_adage3`; normalises and merges; writes `processed/merged/merged_NYC_{timestamp}.json`.
+
+        **Lambda event shape (matches code):** `bucket` is read from the **root** of the event dict
+        (`event.get("bucket")`). The handler does **not** parse `event["body"]` for JSON. For API Gateway,
+        use a proxy integration that merges the request body into the event, or pass `bucket` as a
+        top-level key on direct invocation. Default bucket is `S3_BUCKET_NAME` from the environment.
       requestBody:
+        required: false
         content:
           application/json:
             schema:
               type: object
               properties:
-                limit:
-                  type: integer
-                  example: 1000
-                  description: Number of records to fetch (default 1000)
+                bucket:
+                  type: string
+                  description: S3 bucket name (default from environment).
+            example: {}
       responses:
         "200":
-          description: Successfully collected Taxi trip data.
+          description: Preprocessing finished (handler always returns 200 on success).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CollectionResponse'
+                $ref: "#/components/schemas/PreprocessSuccess"
+              example:
+                message: Preprocessing complete
+                merged_records: 15
+                s3_key: processed/merged/merged_NYC_20260315120000.json
+                sources:
+                  ticketmaster_files: 1
+                  taxi_files: 1
+                  weather_files: 1
+                daily_records:
+                  ticketmaster: 3
+                  taxi: 9
+                  weather: 3
+
+  /predict:
+    post:
+      tags: [AnalyticalModel]
+      summary: Crowd Demand Index for a borough (or all boroughs)
+      operationId: predictDemand
+      description: |
+        Body is parsed from `event["body"]` when present, else the whole `event` is treated as the body.
+
+        When `compare_all_boroughs` is true, `borough` is not required; response wraps five
+        `predict()` results under `boroughs`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PredictRequest"
+            examples:
+              single:
+                summary: Single borough
+                value:
+                  borough: Manhattan
+                  start_date: "2026-04-15"
+                  end_date: "2026-04-17"
+                  time_of_day: evening
+              allBoroughs:
+                summary: Compare all boroughs
+                value:
+                  compare_all_boroughs: true
+                  start_date: "2026-04-15"
+                  end_date: "2026-04-17"
+                  time_of_day: all
+      responses:
+        "200":
+          description: Parsed prediction payload(s).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PredictSingleSuccess"
+                  - $ref: "#/components/schemas/PredictCompareAllSuccess"
+                  - $ref: "#/components/schemas/PredictWarning"
+                  - $ref: "#/components/schemas/PredictErrorPayload"
+        "400":
+          description: Validation error (missing fields, invalid borough, dates, or time_of_day).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HandlerError"
         "500":
-          description: Failed to write in S3 or NYC TLC API error.
-  
+          description: Uncaught exception from `predict()`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HandlerError"
+
   /collect/ticketmaster:
     post:
-      tags: [Data Collection]
-      summary: Collects Ticketmaster public event data
+      tags: [DataCollection]
+      summary: Collect Ticketmaster events (Lambda in collectTicketmaster.py)
+      operationId: collectTicketmaster
       description: |
-        Scraps public events from the Ticketmaster Discovery API and stores the raw data in S3 using the ADAGE 3.0 format.
+        Handler reads keys directly from `event` (not nested under `body` unless API Gateway merges JSON into event).
       requestBody:
+        required: false
         content:
           application/json:
             schema:
@@ -66,37 +249,51 @@ paths:
                   example: US
                 start_date:
                   type: string
-                  format: date
+                  description: Passed through to Ticketmaster API filter.
                   example: "2026-03-29"
                 end_date:
                   type: string
-                  format: date
                   example: "2026-04-05"
                 classification:
                   type: string
+                  description: Ticketmaster segment filter (e.g. Music, Sports).
                   example: Music
-                  description: "Music | Sports | Arts & Theatre | Film | Miscellaneous"
       responses:
         "200":
-          description: Successfully collected Ticketmaster data.
+          description: Collection complete; ADAGE written to S3.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CollectionResponse"
+                $ref: "#/components/schemas/CollectionSuccessTicketmaster"
         "400":
-          description: Missing or invalid API key
+          description: Missing or invalid API key (runtime).
         "429":
-          description: Ticketmaster rate limit exceeded (5 req/s on free tier)
+          description: Ticketmaster rate limit (runtime).
         "500":
-          description: Ticketmaster API error or S3 write failure
-  
+          description: Ticketmaster API or S3 write failure (runtime).
+
+  /collect/nyc-tlc:
+    post:
+      tags: [DataCollection]
+      summary: Collect NYC TLC trip sample (Lambda in collectNYCTaxi.py)
+      operationId: collectNycTlc
+      description: |
+        No request parameters from `event` in code; row limit is fixed by module constant `LIMIT`.
+      responses:
+        "200":
+          description: Collection complete; ADAGE written to S3.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionSuccessSimple"
+
   /collect/weather:
     post:
-      tags: [Data Collection]
-      summary: Collects weather forecast event data
-      description: |
-        Scraps a 7-day hourly weather forecast from Open-Meteo API, and stores the raw data in S3 using the ADAGE 3.0 format.
+      tags: [DataCollection]
+      summary: Collect Open-Meteo weather (Lambda in collectWeather.py)
+      operationId: collectWeather
       requestBody:
+        required: false
         content:
           application/json:
             schema:
@@ -104,15 +301,15 @@ paths:
               properties:
                 lat:
                   type: number
-                  example: -72
-                  description: Latitude (defaults to NYC Midtown)
+                  description: Defaults to module `DEFAULT_LAT` if omitted.
+                  example: 40.7128
                 lng:
                   type: number
-                  example: 115
-                  description: Longitude (defaults to NYC Midtown)
+                  description: Defaults to module `DEFAULT_LNG` if omitted.
+                  example: -74.006
       responses:
         "200":
-          description: Successfully collected weather data.
+          description: Collection complete; ADAGE written to S3.
           content:
             application/json:
               schema:
@@ -357,233 +554,218 @@ components:
 
     RetrieveResponse:
       type: object
+      required: [status, borough, count, files_read, filters_applied, records]
       properties:
         status:
           type: string
           example: success
         borough:
           type: string
-          example: Manhattan
+          description: Requested borough or literal `all`.
         count:
           type: integer
-          example: 67
         files_read:
           type: integer
-          example: 3
         filters_applied:
           type: object
           properties:
-            source:
-              type: string
-            start_date:
-              type: string
-            end_date:
-              type: string
-            event_type:
-              type: string
-            borough:
-              type: string
-            limit:
-              type: integer
+            source: { type: string }
+            start_date: { type: string, nullable: true }
+            end_date: { type: string, nullable: true }
+            event_type: { type: string, nullable: true }
+            borough: { type: string, nullable: true }
+            limit: { type: integer, nullable: true }
         records:
           type: array
-          description: |
-            The ADAGE 3.0 Event objects in records can vary based on data source filters. This example contains WeatherEvent schema that may be returned.
+          description: ADAGE event objects (subset of fields per source).
           items:
-            $ref: '#/components/schemas/WeatherEvent'
-    ErrorResponse:
+            type: object
+            additionalProperties: true
+
+    RetrieveError:
       type: object
-      description: Example for invalid borough
       properties:
         status:
           type: string
           example: error
         error:
           type: string
-          example: "Invalid borough: Florida"
         valid_boroughs:
           type: array
-          items:
-            type: string
-            example: [Bronx, Brooklyn, Manhattan, Queens, Staten Island]
-    PreprocessResponse:
+          items: { type: string }
+        valid_sources:
+          type: array
+          items: { type: string }
+
+    GenericError:
       type: object
       properties:
-        message:
-          type: string
-          example: Preprocessing complete
-        merged_records:
-          type: integer
-          description: Total number of merged daily borough records written to S3.
-          example: 16
-        s3_key:
-          type: string
-          example: processed/merged/merged_NYC_20260416140000.json
+        status: { type: string }
+        error: { type: string }
+
+    PreprocessSuccess:
+      type: object
+      required: [message, merged_records, s3_key, sources, daily_records]
+      properties:
+        message: { type: string }
+        merged_records: { type: integer }
+        s3_key: { type: string }
         sources:
           type: object
-          description: Number of raw S3 files read per data source.
           properties:
-            ticketmaster_files:
-              type: integer
-              example: 6
-            taxi_files:
-              type: integer
-              example: 7
-            weather_files:
-              type: integer
-              example: 5
+            ticketmaster_files: { type: integer }
+            taxi_files: { type: integer }
+            weather_files: { type: integer }
         daily_records:
           type: object
-          description: Number of normalised daily records per source before the merge.
           properties:
-            ticketmaster:
-              type: integer
-              example: 14
-            taxi:
-              type: integer
-              example: 27
-            weather:
-              type: integer
-              example: 11
-    AnalyticalModelErrorResponse:
+            ticketmaster: { type: integer }
+            taxi: { type: integer }
+            weather: { type: integer }
+
+    PredictRequest:
+      type: object
+      required: [start_date, end_date]
+      properties:
+        borough:
+          $ref: "#/components/schemas/Borough"
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        time_of_day:
+          $ref: "#/components/schemas/TimeOfDay"
+          default: all
+        event_type:
+          type: string
+          description: Accepted by handler but not used in `prophet_model.predict` implementation.
+        compare_all_boroughs:
+          type: boolean
+          default: false
+        bucket:
+          type: string
+          description: S3 bucket override; default `S3_BUCKET_NAME`.
+
+    ContributingFactors:
+      type: object
+      properties:
+        taxi_signal: { type: number }
+        event_signal: { type: number }
+        weather_impact: { type: number }
+        active_events: { type: integer }
+
+    ModelInfo:
+      type: object
+      properties:
+        training_days: { type: integer }
+        borough: { type: string }
+        lookback_days: { type: integer }
+
+    PredictionDay:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        crowd_demand_index: { type: number }
+        lower_bound: { type: number }
+        upper_bound: { type: number }
+        confidence: { type: number, description: "0–1 derived from prediction interval width" }
+        contributing_factors:
+          $ref: "#/components/schemas/ContributingFactors"
+        time_of_day: { type: string }
+        weather_condition: { type: string }
+        weather_multiplier: { type: number }
+
+    PredictSingleSuccess:
+      type: object
+      required: [status, borough]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        borough: { type: string }
+        predictions:
+          type: array
+          items: { $ref: "#/components/schemas/PredictionDay" }
+        contributing_factors:
+          $ref: "#/components/schemas/ContributingFactors"
+        model_info:
+          $ref: "#/components/schemas/ModelInfo"
+
+    PredictWarning:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [warning]
+        borough: { type: string }
+        message: { type: string }
+        predictions:
+          type: array
+          items: { $ref: "#/components/schemas/PredictionDay" }
+        contributing_factors:
+          $ref: "#/components/schemas/ContributingFactors"
+        model_info:
+          $ref: "#/components/schemas/ModelInfo"
+
+    PredictErrorPayload:
+      type: object
+      description: Prophet failure — HTTP 200 with error status in body (see `prophet_model.predict`).
+      properties:
+        status:
+          type: string
+          enum: [error]
+        borough: { type: string }
+        message: { type: string }
+        predictions:
+          type: array
+          items: { $ref: "#/components/schemas/PredictionDay" }
+        contributing_factors:
+          $ref: "#/components/schemas/ContributingFactors"
+        model_info:
+          $ref: "#/components/schemas/ModelInfo"
+
+    PredictCompareAllSuccess:
+      type: object
+      required: [status, compare_all_boroughs, boroughs]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        compare_all_boroughs:
+          type: boolean
+          example: true
+        boroughs:
+          type: object
+          additionalProperties:
+            oneOf:
+              - $ref: "#/components/schemas/PredictSingleSuccess"
+              - $ref: "#/components/schemas/PredictWarning"
+              - $ref: "#/components/schemas/PredictErrorPayload"
+
+    HandlerError:
       type: object
       properties:
         status:
           type: string
           example: error
-        borough:
+        error:
           type: string
-          example: Florida
-        message:
-          type: string
-          example: "Prophet model fitting failed: (error message)"
-        predictions:
-          type: object
-          properties:
-            date:
-              type: string
-              format: date-time
-              example: 2026-04-20T21:35:67Z
-            demand_index:
-              type: number
-              example: 50.0
-            confidence_lower:
-              type: number
-              example: 30.0
-            confidence_upper: 
-              type: number
-              example: 70.0
-            time_of_day: 
-              type: string
-              enum: [morning, afternoon, evening, night, all]
-              example: all
-            weather_condition:
-              type: string
-              enum: [thunderstorm, snow, rain, showers, fog, cloudy, clear, unknown]
-              example: unknown
-            weather_multiplier:
-              type: number
-              example: 1.0
-        contributing_factors:
-          type: object
-          properties:
-            taxi_signal:
-              type: number
-              example: 0.0
-            event_signal:
-              type: number
-              example: 0.1
-            weather_impact:
-              type: number
-              example: 1.0
-            active_events:
-              type: number
-              example: 0.0
-        model_info:
-          type: object
-          properties:
-            training_days:
-              type: integer
-              example: 100
-            borough:
-              type: string
-              example: Manhattan
-            lookback_days:
-              type: integer
-              example: 60
-    PredictionRecord:
-      type: object
-      description: A single day's Crowd Demand Index prediction.
-      properties:
-        date:
-          type: string
-          format: date
-          example: 2026-04-15
-        demand_index:
-          type: number
-          description: Predicted demand score from 0 (low) to 100 (high).
-          example: 72.4
-        confidence_lower:
-          type: number
-          example: 58.1
-        confidence_upper:
-          type: number
-          example: 85.3
-        time_of_day:
-          type: string
-          example: evening
-        weather_condition:
-          type: string
-          example: clear
-        weather_multiplier:
-          type: number
-          example: 1.0
-    AnalyticalResponse:
+
+    CollectionSuccessTicketmaster:
       type: object
       properties:
-        status:
-          type: string
-          enum: [success, warning, error]
-          example: success
-        borough:
-          type: string
-          example: Manhattan
-        predictions:
-          type: array
-          description: Per-day Crowd Demand Index predictions for the requested date range.
-          items:
-            $ref: '#/components/schemas/PredictionRecord'
-        contributing_factors:
-          type: object
-          description: Breakdown of signal contributions used in the prediction.
-          properties:
-            taxi_signal:
-              type: number
-              description: Normalised taxi trip volume signal (0–1).
-              example: 0.85
-            event_signal:
-              type: number
-              description: Normalised event count signal (0–1).
-              example: 0.4
-            weather_impact:
-              type: number
-              description: Weather demand multiplier applied to predictions.
-              example: 1.0
-            active_events:
-              type: integer
-              description: Number of active events on the last historical day.
-              example: 3
-        model_info:
-          type: object
-          properties:
-            training_days:
-              type: integer
-              description: Number of historical daily records used to train the model.
-              example: 87
-            borough:
-              type: string
-              example: Manhattan
-            lookback_days:
-              type: integer
-              description: Historical window used for training (default 90 days).
-              example: 90
+        message: { type: string }
+        records_collected: { type: integer }
+        total_available:
+          type: integer
+          description: Ticketmaster page `totalElements`.
+        s3_location: { type: string }
+
+    CollectionSuccessSimple:
+      type: object
+      properties:
+        message: { type: string }
+        records_collected: { type: integer }
+        s3_location: { type: string }

@@ -65,3 +65,10 @@ def validate_adage3_file(filepath: str) -> tuple[bool, str]:
     with open(filepath, "r") as f:
         data = json.load(f)
     return validate_adage3(data)
+
+
+
+
+[ '1', 'ewr' 'sjdshfv']
+
+
