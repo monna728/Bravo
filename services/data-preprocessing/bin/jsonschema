@@ -1,5 +1,5 @@
 #!/bin/sh
-'''exec' "/Users/Karisse/Documents/uni/4th year/SENG3011/Bravo/services/data-preprocessing/venv/bin/python3.13" "$0" "$@"
+'''exec' "/Users/Karisse/Documents/uni/4th year/SENG3011/Bravo/venv/bin/python3.13" "$0" "$@"
 ' '''
 # -*- coding: utf-8 -*-
 import re
