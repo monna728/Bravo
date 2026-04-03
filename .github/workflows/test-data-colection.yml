@@ -48,6 +48,7 @@ jobs:
       # Fails the step (and therefore the pipeline) if any test fails.
       - name: Run tests with coverage
         run: |
+          mkdir -p reports
           pytest tests/test_collectWeather.py \
                  tests/test_collectNYCTaxi.py \
                  tests/test_collectTicketmaster.py \
