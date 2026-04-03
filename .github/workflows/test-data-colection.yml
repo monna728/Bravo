@@ -39,12 +39,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ── 4. Run tests with coverage ───────────────────────────────────────
-      # --cov-report=term-missing  → visible in Actions log for debugging
-      # --cov-report=html          → downloadable HTML artefact
-      # --cov-report=xml           → machine-readable for tools like Codecov
-      # --junitxml                 → test result artefact (pass/fail per test)
-      # -v                         → verbose: each test name printed
+      # ── 4. Install PDF generation dependencies ───────────────────────────
+      # weasyprint converts HTML to PDF. Its system dependencies (pango, cairo) are
+      # needed on Ubuntu for font rendering.
+      - name: Install PDF generation dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
+          pip install weasyprint
+
+      # ── 5. Run tests with coverage ───────────────────────────────────────
+      # --cov-report=term-missing
+      # --cov-report=html 
+      # --cov-report=xml
+      # --junitxml 
+      # -v 
       # Fails the step (and therefore the pipeline) if any test fails.
       - name: Run tests with coverage
         run: |
@@ -59,11 +68,55 @@ jobs:
                  --junitxml=reports/test-results.xml \
                  -v 2>&1 | tee reports/test-output.txt
 
-      # ── 5. Upload test report artefacts ──────────────────────────────────
-      # These are available as downloadable zip files on the Actions run page.
-      # retention-days: 30 keeps them for a month, matching typical sprint cycles.
+      # ── 6. Generate PDF report ────────────────────────────────────────────
+      # converts the HTML coverage report to a single PDF using weasyprint giving a downloadable failure report as well
+      - name: Generate PDF test report
+        if: always()
+        run: |
+          python - <<'EOF'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          html_index = Path("reports/coverage-html/index.html")
+          pdf_out    = Path("reports/test-report.pdf")
+
+          if not html_index.exists():
+              # If pytest failed before producing HTML, build a minimal HTML page
+              # from the raw text log so there is still something to convert.
+              print("No HTML report found — writing a plain-text PDF fallback.")
+              log = Path("reports/test-output.txt")
+              log_text = log.read_text() if log.exists() else "No test output captured."
+              html_index.parent.mkdir(parents=True, exist_ok=True)
+              html_index.write_text(
+                  f"<html><body><pre>{log_text}</pre></body></html>",
+                  encoding="utf-8",
+              )
+
+          result = subprocess.run(
+              [sys.executable, "-m", "weasyprint",
+               str(html_index), str(pdf_out)],
+              capture_output=True, text=True,
+          )
+          if result.returncode != 0:
+              print("weasyprint stderr:", result.stderr)
+              sys.exit(result.returncode)
+
+          size_kb = pdf_out.stat().st_size // 1024
+          print(f"PDF report generated: {pdf_out} ({size_kb} KB)")
+          EOF
+
+      # ── 7. Upload test report artefacts ──────────────────────────────────
+      - name: Upload PDF test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-pdf
+          path: reports/test-report.pdf
+          retention-days: 30
+
       - name: Upload HTML coverage report
-        if: always()   # upload even if tests fail, so you can diagnose failures
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report-html
@@ -94,7 +147,7 @@ jobs:
           path: reports/coverage.xml
           retention-days: 30
 
-      # ── 6. Print coverage summary to Actions log ─────────────────────────
+      # ── 8. Print coverage summary to Actions log ─────────────────────────
       - name: Print coverage summary
         if: always()
         run: |
