@@ -1439,7 +1439,6 @@ def attrs(
         on_setattr = setters.pipe(*on_setattr)
 
     def wrap(cls):
-        nonlocal hash
         is_frozen = frozen or _has_frozen_base_class(cls)
         is_exc = auto_exc is True and issubclass(cls, BaseException)
         has_own_setattr = auto_detect and _has_own_attribute(
