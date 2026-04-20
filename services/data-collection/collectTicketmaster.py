@@ -4,9 +4,18 @@ import sys
 import time
 import boto3
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+try:
+    from dotenv import load_dotenv
+
+    _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    load_dotenv(os.path.join(_REPO_ROOT, ".env"))
+except ImportError:
+    pass
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
 TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2/events.json"
@@ -16,7 +25,13 @@ S3_KEY_PREFIX = "ticketmaster/raw"
 DEFAULT_CITY = "New York"
 DEFAULT_STATE = "NY"
 DEFAULT_COUNTRY = "US"
-DEFAULT_SIZE = 50
+# Discovery API allows up to 200 per page; paginate for full window coverage.
+DEFAULT_SIZE = 200
+# Default Lambda window: next 90 days of events (inclusive span).
+DEFAULT_EVENT_WINDOW_DAYS = 90
+MAX_TICKETMASTER_PAGES = 100
+# Discovery API deep paging hard limit: offset <= 1000 results.
+MAX_TICKETMASTER_OFFSET = 1000
 TIMEZONE = "America/New_York"
 
 CLASSIFICATION_MAP = {
@@ -61,6 +76,72 @@ def fetch_events(
     response = requests.get(TICKETMASTER_API, params=params, timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+def default_ticketmaster_date_range(days: int = DEFAULT_EVENT_WINDOW_DAYS) -> tuple[str, str]:
+    """Inclusive ``days``-day forward window from UTC today (for upcoming events)."""
+    today = datetime.now(timezone.utc).date()
+    start = today.isoformat()
+    end = (today + timedelta(days=days - 1)).isoformat()
+    return start, end
+
+
+def fetch_events_all_pages(
+    city: str = DEFAULT_CITY,
+    state_code: str = DEFAULT_STATE,
+    country_code: str = DEFAULT_COUNTRY,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    classification: str | None = None,
+    size: int = DEFAULT_SIZE,
+) -> dict:
+    """Fetch all pages in the date window (Ticketmaster caps ``size`` per request)."""
+    sd, ed = start_date, end_date
+    if not sd or not ed:
+        sd, ed = default_ticketmaster_date_range()
+
+    # Ticketmaster rejects deep pages beyond ~1000 offset with HTTP 400.
+    safe_size = max(1, min(size, DEFAULT_SIZE))
+    max_page_from_offset = MAX_TICKETMASTER_OFFSET // safe_size
+    all_events: list = []
+    page = 0
+    total_elements = 0
+    while page < MAX_TICKETMASTER_PAGES and page <= max_page_from_offset:
+        try:
+            raw = fetch_events(
+                city=city,
+                state_code=state_code,
+                country_code=country_code,
+                start_date=sd,
+                end_date=ed,
+                classification=classification,
+                size=safe_size,
+                page=page,
+            )
+        except requests.exceptions.HTTPError as exc:
+            # Some queries intermittently 400 on higher pages; keep collected pages.
+            if page > 0 and exc.response is not None and exc.response.status_code == 400:
+                break
+            raise
+        emb = raw.get("_embedded") or {}
+        chunk = emb.get("events") or []
+        all_events.extend(chunk)
+        pg = raw.get("page") or {}
+        total_elements = int(pg.get("totalElements", len(all_events)))
+        total_pages = int(pg.get("totalPages", 1))
+        if not chunk or page + 1 >= total_pages:
+            break
+        page += 1
+
+    return {
+        "_embedded": {"events": all_events},
+        "page": {
+            "size": len(all_events),
+            "totalElements": total_elements,
+            "totalPages": 1,
+            "number": 0,
+        },
+    }
 
 
 def extract_venue_location(event_raw: dict) -> dict:
@@ -183,9 +264,12 @@ def lambda_handler(event: dict, context) -> dict:
     start_date = event.get("start_date")
     end_date = event.get("end_date")
     classification = event.get("classification")
+    window_days = int(event.get("event_window_days", DEFAULT_EVENT_WINDOW_DAYS))
+    if not start_date or not end_date:
+        start_date, end_date = default_ticketmaster_date_range(days=window_days)
 
     try:
-        raw_response = fetch_events(
+        raw_response = fetch_events_all_pages(
             city=city,
             state_code=state_code,
             country_code=country_code,
@@ -226,7 +310,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps({
             "message": "Ticketmaster data collection complete",
             "records_collected": n,

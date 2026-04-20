@@ -25,11 +25,15 @@ from accuracy_tester import (  # noqa: E402
     run_score_bounds_test,
     run_weather_multiplier_test,
 )
-from backtester import run_walk_forward_backtest  # noqa: E402
+from backtester import ACCURACY_THRESHOLD, run_walk_forward_backtest  # noqa: E402
+
+import sys as _sys
+_sys.path.insert(0, os.path.join(_ROOT, ".."))
+from shared.cors import CORS_HEADERS  # noqa: E402
 from report_generator import build_report, save_report_to_s3  # noqa: E402
 
 DEFAULT_BUCKET = os.environ.get("rushhour-data", os.environ.get("S3_BUCKET_NAME", "bucket-placeholder"))
-ACC_THRESHOLD = 80.0
+ACC_THRESHOLD = ACCURACY_THRESHOLD
 
 
 def _parse_body(event: dict) -> dict:
@@ -70,7 +74,10 @@ def _run_suites(
                 "n_test": br.get("n_test"),
             }
 
-        reg = run_regressor_impact_across_boroughs(bucket)
+        reg = run_regressor_impact_across_boroughs(
+            bucket,
+            boroughs=b_list if borough else None,
+        )
         results["regressor_impact"] = reg
         passes.append(reg.get("pass", False))
 
@@ -116,7 +123,8 @@ def run_tests(
         warnings.append(f"Overall backtest accuracy {overall_acc}% is below {ACC_THRESHOLD}% threshold.")
     for name, tr in test_results.items():
         if isinstance(tr, dict) and tr.get("pass") is False and name == "backtest":
-            warnings.append("One or more boroughs failed the ±15 point accuracy threshold.")
+            tol = tr.get("tolerance", "configured")
+            warnings.append(f"One or more boroughs failed the ±{tol} point accuracy tolerance.")
 
     report = build_report(
         test_results=test_results,
@@ -145,7 +153,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     except json.JSONDecodeError:
         return {
             "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
+            "headers": CORS_HEADERS,
             "body": json.dumps({"error": "Invalid JSON body"}),
         }
 
@@ -155,7 +163,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     if test_suite not in ("all", "accuracy", "edge_cases", "contract"):
         return {
             "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
+            "headers": CORS_HEADERS,
             "body": json.dumps({"error": "test_suite must be all, accuracy, edge_cases, or contract"}),
         }
 
@@ -165,7 +173,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
         except RuntimeError as exc:
             return {
                 "statusCode": 503,
-                "headers": {"Content-Type": "application/json"},
+                "headers": CORS_HEADERS,
                 "body": json.dumps({
                     "error": "prophet_runtime_unavailable",
                     "message": str(exc),
@@ -175,7 +183,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     payload = run_tests(bucket=bucket, borough=borough, test_suite=test_suite)
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(payload),
     }
 

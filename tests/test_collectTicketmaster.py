@@ -13,6 +13,7 @@ os.environ["TICKETMASTER_API_KEY"] = "test-key"
 
 from collectTicketmaster import (
     fetch_events,
+    fetch_events_all_pages,
     extract_venue_location,
     classify_event,
     extract_datetime,
@@ -229,6 +230,26 @@ def test_fetch_events_raises_without_api_key():
             fetch_events()
 
 
+def test_fetch_events_all_pages_merges_multiple_pages():
+    page0 = {
+        "_embedded": {"events": [MOCK_EVENT]},
+        "page": {"size": 1, "totalElements": 2, "totalPages": 2, "number": 0},
+    }
+    page1 = {
+        "_embedded": {"events": [MOCK_EVENT_MINIMAL]},
+        "page": {"size": 1, "totalElements": 2, "totalPages": 2, "number": 1},
+    }
+    with patch("collectTicketmaster.fetch_events", side_effect=[page0, page1]) as mock_fe:
+        merged = fetch_events_all_pages(
+            start_date="2026-04-01",
+            end_date="2026-04-30",
+        )
+
+    assert mock_fe.call_count == 2
+    assert len(merged["_embedded"]["events"]) == 2
+    assert merged["page"]["totalElements"] == 2
+
+
 # ── save_to_s3 ───────────────────────────────────────────────────────────────
 
 @mock_aws
@@ -291,7 +312,7 @@ def test_lambda_handler_writes_response_and_s3_object(aws_credentials):
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=S3_BUCKET)
 
-    with patch("collectTicketmaster.fetch_events", return_value=MOCK_TM_RESPONSE):
+    with patch("collectTicketmaster.fetch_events_all_pages", return_value=MOCK_TM_RESPONSE):
         response = lambda_handler(
             {
                 "city": "New York",

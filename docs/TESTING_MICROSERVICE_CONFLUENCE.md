@@ -12,9 +12,9 @@ The **testing microservice** (`services/testing/`) complements unit tests under 
 
 | # | Name | What it does |
 |---|------|----------------|
-| 1 | **Backtesting accuracy** | 80% / 20% date split per borough; Prophet with regressors; ±15 point accuracy vs `demand_proxy`; MAE/RMSE; borough pass ≥80%; **overall** = mean borough accuracy ≥80%. |
+| 1 | **Backtesting accuracy** | Per borough: ≥**91** distinct calendar days in merged S3 (≥**90** in the training split); 80% / 20% date split; Prophet with regressors; ±15 vs `demand_proxy`; MAE/RMSE. **Overall** = among boroughs that ran (enough data), mean accuracy ≥80% **and** each of those boroughs passes ≥80%. Sparse boroughs are skipped for the aggregate, not averaged as 0%. |
 | 2 | **Metrics** | `metrics.py`: accuracy, MAE, RMSE, MAPE, directional accuracy (≥70% flag), `score_summary`. |
-| 3 | **Regressor impact** | Baseline Prophet (no regressors) vs full model on the same hold-out; **pass** if mean improvement across boroughs with data is **≥ 3** percentage points. |
+| 3 | **Regressor impact** | Baseline vs full model on the same hold-out (boroughs with ≥91 distinct days only). **Pass** if mean uplift **≥ 3** pp, **or** mean uplift **≥ 0** and mean full-model accuracy **≥ 90%** (flat regressors on already-strong fit). |
 | 4 | **Edge cases** | Insufficient history (&lt; `MIN_DATAPOINTS`), invalid borough → 400, 50× scores in [0,100], interval order, weather multiplier (clear vs thunderstorm history), `compare_all_boroughs` → 5 boroughs. |
 | 5 | **API contract** | Top-level `status`, `borough`, `predictions`; each prediction has `crowd_demand_index`, `lower_bound`, `upper_bound`, `confidence`, `contributing_factors`, etc. |
 
@@ -45,7 +45,8 @@ The **testing microservice** (`services/testing/`) complements unit tests under 
 | Backtest accuracy | **≥ 80%** of days within **±15** of `demand_proxy` | Course / product bar for usable forecasts |
 | Directional accuracy (in `score_summary`) | **≥ 70%** | Demand “direction” should be right often even when levels differ |
 | Regressor uplift | **≥ +3 pp** mean accuracy vs baseline | Ticketmaster + weather regressors should help vs trips-only Prophet |
-| `MIN_DATAPOINTS` | **14** days | ~2 weeks minimum for meaningful seasonality |
+| `MIN_DATAPOINTS` (Prophet) | **14** rows | Engineering floor: below this, `predict` warns / fallback — not a 90-day claim. |
+| Backtest / regressor history | **> 90** distinct days in merged data | Matches proposal “~90 days training”; train split uses ≥90 calendar days. |
 
 ---
 

@@ -47,7 +47,10 @@ SIGNAL_WEIGHTS = {
     "weather": 0.20,
 }
 
+# Normal operation (proposal): ~90 calendar days of merged history for training context.
 DEFAULT_LOOKBACK_DAYS = 90
+# Engineering floor: below this many rows Prophet fits are unreliable; we warn / fallback instead of
+# claiming a full 90-day-quality forecast. (Proposal footnote: <14 days → insufficient for a reliable fit.)
 MIN_DATAPOINTS = 14
 
 
