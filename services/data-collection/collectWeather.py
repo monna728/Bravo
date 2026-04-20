@@ -4,12 +4,14 @@ import sys
 import time
 import boto3
 import requests
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
-OPEN_METEO_API = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_FORECAST_API = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_ARCHIVE_API = "https://archive-api.open-meteo.com/v1/archive"
 S3_BUCKET      = "rushhour-data"
 # S3_KEY = f"weather/raw/weather_forecast_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
 S3_KEY         = "weather/raw/weather_forecast.json"
@@ -18,19 +20,52 @@ DEFAULT_LAT    = 40.7128
 DEFAULT_LNG    = -74.0060
 TIMEZONE       = "America/New_York"
 FORECAST_DAYS  = 7
+WEATHER_LOOKBACK_DAYS = 90
 
 
-# call the Open-Meteo API and return raw forecast response
-def fetch_weather_data(lat=DEFAULT_LAT, lng=DEFAULT_LNG, forecast_days=FORECAST_DAYS):
+def fetch_weather_data(
+    lat=DEFAULT_LAT,
+    lng=DEFAULT_LNG,
+    *,
+    forecast_days: int | None = None,
+    lookback_days: int = WEATHER_LOOKBACK_DAYS,
+    start_date: str | None = None,
+    end_date: str | None = None,
+):
+    """Return Open-Meteo hourly JSON.
+
+    If ``forecast_days`` is set, uses the short-range **forecast** API (for tests / quick runs).
+    Otherwise uses the **archive** API for ``lookback_days`` ending ``end_date`` (default: today),
+    giving roughly that many calendar days of hourly history (>= 90 days when defaults apply).
+    """
+    if forecast_days is not None:
+        params = {
+            "latitude": lat,
+            "longitude": lng,
+            "hourly": "precipitation,temperature_2m,precipitation_probability",
+            "forecast_days": forecast_days,
+            "timezone": TIMEZONE,
+        }
+        response = requests.get(OPEN_METEO_FORECAST_API, params=params, timeout=60)
+        response.raise_for_status()
+        return response.json()
+
+    end = end_date or date.today().isoformat()
+    if start_date:
+        start = start_date
+    else:
+        end_d = date.fromisoformat(end)
+        start = (end_d - timedelta(days=lookback_days - 1)).isoformat()
+
     params = {
-        "latitude":              lat,
-        "longitude":             lng,
-        "hourly":                "precipitation,temperature_2m,precipitation_probability",
-        "forecast_days":         forecast_days,
-        "timezone":              TIMEZONE,
+        "latitude": lat,
+        "longitude": lng,
+        "start_date": start,
+        "end_date": end,
+        "hourly": "precipitation,temperature_2m,precipitation_probability",
+        "timezone": TIMEZONE,
     }
-    response = requests.get(OPEN_METEO_API, params=params, timeout=30)
-    # checks the HTTP status code and raises an exception if the request was unsuccessful
+    response = requests.get(OPEN_METEO_ARCHIVE_API, params=params, timeout=120)
     response.raise_for_status()
     return response.json()
 
@@ -70,6 +105,24 @@ def classify_weather(precipitation_mm):
     return "extreme"
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # convert raw Open-Meteo response into ADAGE 3.0 data model format
 # each hourly forecast slot becomes one 'event' in the events array
 def transform_to_adage(raw_response, lat=DEFAULT_LAT, lng=DEFAULT_LNG):
@@ -93,9 +146,9 @@ def transform_to_adage(raw_response, lat=DEFAULT_LAT, lng=DEFAULT_LNG):
     }
 
     for i, timestamp in enumerate(times):
-        precipitation_mm = float(precip[i])   if i < len(precip)      else 0.0
-        temperature_c    = float(temp[i])      if i < len(temp)        else 0.0
-        precip_pct       = int(precip_prob[i]) if i < len(precip_prob) else 0
+        precipitation_mm = _safe_float(precip[i]) if i < len(precip) else 0.0
+        temperature_c = _safe_float(temp[i]) if i < len(temp) else 0.0
+        precip_pct = _safe_int(precip_prob[i]) if i < len(precip_prob) else 0
 
         event = {
             "time_object": {
@@ -139,8 +192,20 @@ def lambda_handler(event, context):
 
     lat = ev.get("lat", DEFAULT_LAT)
     lng = ev.get("lng", DEFAULT_LNG)
+    lookback = int(ev.get("lookback_days", WEATHER_LOOKBACK_DAYS))
+    start_d = ev.get("start_date")
+    end_d = ev.get("end_date")
+    use_forecast = ev.get("use_forecast_only") is True
+    fd = FORECAST_DAYS if use_forecast else None
 
-    raw_response = fetch_weather_data(lat=lat, lng=lng)
+    raw_response = fetch_weather_data(
+        lat=lat,
+        lng=lng,
+        forecast_days=fd,
+        lookback_days=lookback,
+        start_date=start_d,
+        end_date=end_d,
+    )
     print(f"Fetched {len(raw_response.get('hourly', {}).get('time', []))} hourly records from Open-Meteo")
 
     adage_data = transform_to_adage(raw_response, lat=lat, lng=lng)
@@ -169,6 +234,7 @@ def lambda_handler(event, context):
 
     return {
         "statusCode": 200,
+        "headers": CORS_HEADERS,
         "body": json.dumps({
             "message":           "Weather data collection complete",
             "records_collected": n,

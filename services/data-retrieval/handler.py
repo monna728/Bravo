@@ -16,6 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from s3_reader import retrieve, SOURCE_PREFIXES, VALID_BOROUGHS
 
@@ -46,7 +47,7 @@ def lambda_handler(event: dict, context) -> dict:
         )
         return {
             "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
+            "headers": CORS_HEADERS,
             "body": json.dumps({
                 "status": "error",
                 "error": f"Invalid borough: {borough}",
@@ -61,7 +62,7 @@ def lambda_handler(event: dict, context) -> dict:
         )
         return {
             "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
+            "headers": CORS_HEADERS,
             "body": json.dumps({
                 "status": "error",
                 "error": f"Unknown source: {source}",
@@ -79,7 +80,7 @@ def lambda_handler(event: dict, context) -> dict:
             )
             return {
                 "statusCode": 400,
-                "headers": {"Content-Type": "application/json"},
+                "headers": CORS_HEADERS,
                 "body": json.dumps({"status": "error", "error": "limit must be an integer"}),
             }
 
@@ -103,7 +104,7 @@ def lambda_handler(event: dict, context) -> dict:
         )
         return {
             "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
+            "headers": CORS_HEADERS,
             "body": json.dumps({"status": "error", "error": str(e)}),
         }
 
@@ -120,7 +121,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(result),
     }
 

@@ -10,11 +10,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "da
 
 from collectNYCTaxi import (
     fetch_tlc_data,
+    fetch_tlc_trips_lookback,
     calculate_duration_minutes,
     transform_to_adage,
     save_to_s3,
     S3_BUCKET,
 )
+from datetime import date as _date
 
 
 @pytest.fixture(autouse=True)
@@ -260,15 +262,16 @@ def test_transform_adage_dataset_id_contains_s3():
     assert result["dataset_id"].startswith("s3://")
 
 
-# ── fetch_tlc_data ──────────────────────────────────────────────────────────
+# ── fetch_tlc_data (day-based) ───────────────────────────────────────────────
 
 def test_fetch_tlc_data_calls_api():
+    target = _date(2024, 6, 15)
     with patch("collectNYCTaxi.requests.get") as mock_get:
         mock_get.return_value = MagicMock(
             json=lambda: MOCK_TLC_RECORDS,
             raise_for_status=lambda: None,
         )
-        result = fetch_tlc_data(limit=100)
+        result = fetch_tlc_data(target, limit=100)
 
     mock_get.assert_called_once()
     call_args = mock_get.call_args
@@ -277,28 +280,57 @@ def test_fetch_tlc_data_calls_api():
 
 
 def test_fetch_tlc_data_passes_limit():
+    target = _date(2024, 6, 15)
     with patch("collectNYCTaxi.requests.get") as mock_get:
         mock_get.return_value = MagicMock(
             json=lambda: MOCK_TLC_RECORDS,
             raise_for_status=lambda: None,
         )
-        fetch_tlc_data(limit=500)
+        fetch_tlc_data(target, limit=500)
 
     params = mock_get.call_args[1]["params"]
     assert params["$limit"] == 500
 
 
-def test_fetch_tlc_data_orders_by_pickup():
+def test_fetch_tlc_data_builds_day_where_clause():
+    target = _date(2024, 6, 15)
     with patch("collectNYCTaxi.requests.get") as mock_get:
         mock_get.return_value = MagicMock(
             json=lambda: MOCK_TLC_RECORDS,
             raise_for_status=lambda: None,
         )
-        fetch_tlc_data()
+        fetch_tlc_data(target)
 
     params = mock_get.call_args[1]["params"]
-    assert "DESC" in params["$order"]
-    assert "tpep_pickup_datetime" in params["$order"]
+    assert "2024-06-15T00:00:00.000" in params["$where"]
+    assert "2024-06-15T23:59:59.999" in params["$where"]
+
+
+# ── fetch_tlc_trips_lookback (day-chunked) ───────────────────────────────────
+
+def test_fetch_tlc_trips_lookback_calls_one_per_day():
+    with patch("collectNYCTaxi._latest_dataset_date", return_value=_date(2024, 6, 20)):
+        with patch("collectNYCTaxi.fetch_tlc_data_for_day", return_value=[{**MOCK_TLC_RECORD_1}]) as mock_day:
+            out = fetch_tlc_trips_lookback(lookback_days=3, trips_per_day=10)
+
+    assert mock_day.call_count == 3
+    assert len(out) == 3
+
+
+def test_fetch_tlc_trips_lookback_skips_failed_day():
+    call_count = 0
+    def side_effect(d, limit):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise Exception("timeout")
+        return [{**MOCK_TLC_RECORD_1}]
+
+    with patch("collectNYCTaxi._latest_dataset_date", return_value=_date(2024, 6, 20)):
+        with patch("collectNYCTaxi.fetch_tlc_data_for_day", side_effect=side_effect):
+            out = fetch_tlc_trips_lookback(lookback_days=3, trips_per_day=10)
+
+    assert len(out) == 2   # 3 days, 1 skipped
 
 
 # ── save_to_s3 ──────────────────────────────────────────────────────────────
@@ -342,7 +374,7 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
             json=lambda: MOCK_TLC_RECORDS,
             raise_for_status=lambda: None,
         )
-        raw = fetch_tlc_data(limit=2)
+        raw = fetch_tlc_data(_date(2024, 6, 15), limit=2)
 
     adage_data = transform_to_adage(raw)
     save_to_s3(adage_data, S3_BUCKET, "tlc/raw/integration_test.json")

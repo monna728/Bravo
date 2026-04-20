@@ -12,6 +12,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from prophet_model import predict, VALID_BOROUGHS, TIME_OF_DAY_FACTORS
 
@@ -115,7 +116,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(result),
     }
 
@@ -188,7 +189,7 @@ def _error_response(status_code: int, message: str) -> dict:
     """Build a standard error response."""
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps({"status": "error", "error": message}),
     }
 

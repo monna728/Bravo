@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.adage_validator import validate_adage3
+from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 from normaliser import normalise_ticketmaster, normalise_nyc_taxi, normalise_weather
 from merger import merge_by_date, merged_to_adage
@@ -152,7 +153,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps({
             "message": "Preprocessing complete",
             **result,

@@ -141,7 +141,7 @@ def test_fetch_weather_data_calls_open_meteo():
             json=lambda: MOCK_OPEN_METEO_RESPONSE,
             raise_for_status=lambda: None,
         )
-        result = fetch_weather_data(lat=40.7128, lng=-74.006)
+        result = fetch_weather_data(lat=40.7128, lng=-74.006, forecast_days=7)
 
     mock_get.assert_called_once()
     call_args = mock_get.call_args
@@ -198,7 +198,7 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
             json=lambda: MOCK_OPEN_METEO_RESPONSE,
             raise_for_status=lambda: None,
         )
-        raw = fetch_weather_data()
+        raw = fetch_weather_data(forecast_days=7)
 
     adage_data = transform_to_adage(raw)
     save_to_s3(adage_data, S3_BUCKET, "weather/raw/integration_test.json")
