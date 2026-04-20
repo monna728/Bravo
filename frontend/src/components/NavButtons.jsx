@@ -42,6 +42,22 @@ export default function NavButtons() {
           <line x1="3" y1="18" x2="3.01" y2="18"/>
         </svg>
       </button>
+
+      <button
+        onClick={() => navigate('/analytics')}
+        title="Analytics"
+        className={`w-11 h-11 rounded-full shadow-lg flex items-center justify-center transition-all ${
+          location.pathname === '/analytics'
+            ? 'bg-blue-500 text-white'
+            : 'bg-white text-gray-600 hover:bg-gray-50'
+        }`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/>
+          <line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+      </button>
     </div>
   );
 }
