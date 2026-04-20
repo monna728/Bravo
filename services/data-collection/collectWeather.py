@@ -22,6 +22,13 @@ TIMEZONE       = "America/New_York"
 FORECAST_DAYS  = 7
 WEATHER_LOOKBACK_DAYS = 90
 
+# Partner integration — T18_ECHO (Venus) Sydney coordinates
+SYDNEY_LAT     = -33.8688
+SYDNEY_LNG     = 151.2093
+# Stable S3 key for the daily-refreshed Sydney raw forecast (raw Open-Meteo JSON, no ADAGE wrapping).
+# T18_ECHO reads this key directly via GET /retrieve?source=sydney_forecast.
+SYDNEY_RAW_S3_KEY = "weather/raw/sydney_forecast.json"
+
 
 def fetch_weather_data(
     lat=DEFAULT_LAT,
@@ -37,14 +44,19 @@ def fetch_weather_data(
     If ``forecast_days`` is set, uses the short-range **forecast** API (for tests / quick runs).
     Otherwise uses the **archive** API for ``lookback_days`` ending ``end_date`` (default: today),
     giving roughly that many calendar days of hourly history (>= 90 days when defaults apply).
+
+    Timezone: "auto" is used for non-NYC coordinates so Open-Meteo returns
+    timestamps in the correct local time for that location (e.g. AEST for Sydney).
     """
+    tz = TIMEZONE if (lat == DEFAULT_LAT and lng == DEFAULT_LNG) else "auto"
+
     if forecast_days is not None:
         params = {
             "latitude": lat,
             "longitude": lng,
             "hourly": "precipitation,temperature_2m,precipitation_probability",
             "forecast_days": forecast_days,
-            "timezone": TIMEZONE,
+            "timezone": tz,
         }
         response = requests.get(OPEN_METEO_FORECAST_API, params=params, timeout=60)
         response.raise_for_status()
@@ -63,7 +75,7 @@ def fetch_weather_data(
         "start_date": start,
         "end_date": end,
         "hourly": "precipitation,temperature_2m,precipitation_probability",
-        "timezone": TIMEZONE,
+        "timezone": tz,
     }
     response = requests.get(OPEN_METEO_ARCHIVE_API, params=params, timeout=120)
     response.raise_for_status()
@@ -197,6 +209,10 @@ def lambda_handler(event, context):
     end_d = ev.get("end_date")
     use_forecast = ev.get("use_forecast_only") is True
     fd = FORECAST_DAYS if use_forecast else None
+    # return_raw=True: skip ADAGE wrapping, save raw Open-Meteo JSON to a
+    # location-specific key and return it directly.  Used by partner integrations
+    # (e.g. T18_ECHO Venus) that consume the Open-Meteo schema directly.
+    return_raw = ev.get("return_raw") is True
 
     raw_response = fetch_weather_data(
         lat=lat,
@@ -206,13 +222,19 @@ def lambda_handler(event, context):
         start_date=start_d,
         end_date=end_d,
     )
-    print(f"Fetched {len(raw_response.get('hourly', {}).get('time', []))} hourly records from Open-Meteo")
-
-    adage_data = transform_to_adage(raw_response, lat=lat, lng=lng)
-    print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
+    n_hourly = len(raw_response.get("hourly", {}).get("time", []))
+    print(f"Fetched {n_hourly} hourly records from Open-Meteo")
 
     try:
-        save_to_s3(adage_data, S3_BUCKET, S3_KEY)
+        if return_raw:
+            # Stable per-location key so partners always GET the latest version.
+            raw_key = ev.get("raw_s3_key", SYDNEY_RAW_S3_KEY)
+            save_to_s3(raw_response, S3_BUCKET, raw_key)
+            print(f"Saved raw Open-Meteo JSON to s3://{S3_BUCKET}/{raw_key}")
+        else:
+            adage_data = transform_to_adage(raw_response, lat=lat, lng=lng)
+            print(f"Transformed {len(adage_data['events'])} events into ADAGE format")
+            save_to_s3(adage_data, S3_BUCKET, S3_KEY)
     except Exception as e:
         log_event(
             "collect-weather", "s3 save failed", level="ERROR", context=context, event=ev,
@@ -220,11 +242,12 @@ def lambda_handler(event, context):
         )
         raise
 
-    n = len(adage_data["events"])
+    n = n_hourly if return_raw else len(adage_data["events"])
+    s3_saved = raw_key if return_raw else S3_KEY
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log_event(
         "collect-weather", "collection complete", context=context, event=ev,
-        duration_ms=elapsed_ms, records_collected=n, s3_key=S3_KEY,
+        duration_ms=elapsed_ms, records_collected=n, s3_key=s3_saved,
     )
     emit_embedded_metric(
         "Bravo",
@@ -232,14 +255,18 @@ def lambda_handler(event, context):
         {"Service": "collect-weather", "Environment": deployment_env()},
     )
 
+    body: dict = {
+        "message":           "Weather data collection complete",
+        "records_collected": n,
+        "s3_location":       f"s3://{S3_BUCKET}/{s3_saved}",
+    }
+    if return_raw:
+        body["data"] = raw_response
+
     return {
         "statusCode": 200,
         "headers": CORS_HEADERS,
-        "body": json.dumps({
-            "message":           "Weather data collection complete",
-            "records_collected": n,
-            "s3_location":       f"s3://{S3_BUCKET}/{S3_KEY}"
-        })
+        "body": json.dumps(body),
     }
 
 

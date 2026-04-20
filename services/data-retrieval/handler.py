@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
-from s3_reader import retrieve, SOURCE_PREFIXES, VALID_BOROUGHS
+from s3_reader import retrieve, retrieve_raw_feed, SOURCE_PREFIXES, RAW_FEED_KEYS, VALID_BOROUGHS
 
 _SERVICE = "data-retrieval"
 
@@ -55,6 +55,33 @@ def lambda_handler(event: dict, context) -> dict:
             }),
         }
 
+    # Raw partner feeds (e.g. sydney_forecast) bypass the ADAGE retrieval pipeline.
+    if source in RAW_FEED_KEYS:
+        try:
+            raw_data = retrieve_raw_feed(source, bucket)
+        except Exception as e:
+            log_event(_SERVICE, "raw feed retrieve failed", level="ERROR",
+                      context=context, event=event,
+                      duration_ms=(time.perf_counter() - t0) * 1000,
+                      error_type=type(e).__name__)
+            return {
+                "statusCode": 404 if "NoSuchKey" in type(e).__name__ else 500,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({
+                    "status": "error",
+                    "error": f"Raw feed '{source}' not yet available. "
+                             "Trigger a collection run first.",
+                }),
+            }
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        log_event(_SERVICE, "raw feed retrieve ok", context=context, event=event,
+                  duration_ms=elapsed_ms, source=source)
+        return {
+            "statusCode": 200,
+            "headers": CORS_HEADERS,
+            "body": json.dumps(raw_data),
+        }
+
     if source not in SOURCE_PREFIXES and source != "all":
         log_event(
             _SERVICE, "validation failed: unknown source", level="ERROR", context=context, event=event,
@@ -66,7 +93,7 @@ def lambda_handler(event: dict, context) -> dict:
             "body": json.dumps({
                 "status": "error",
                 "error": f"Unknown source: {source}",
-                "valid_sources": list(SOURCE_PREFIXES.keys()) + ["all"],
+                "valid_sources": list(SOURCE_PREFIXES.keys()) + list(RAW_FEED_KEYS.keys()) + ["all"],
             }),
         }
 

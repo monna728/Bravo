@@ -21,6 +21,11 @@ SOURCE_PREFIXES = {
     "merged": "processed/merged",
 }
 
+# Exact S3 keys for partner raw-JSON feeds (not prefix-scanned, returned verbatim).
+RAW_FEED_KEYS = {
+    "sydney_forecast": "weather/raw/sydney_forecast.json",
+}
+
 
 def list_keys(bucket: str, prefix: str) -> list[str]:
     """List all .json object keys under a given S3 prefix."""
@@ -47,9 +52,22 @@ def get_prefix_for_source(source: str) -> str:
         return None
     prefix = SOURCE_PREFIXES.get(source)
     if prefix is None:
-        valid = ", ".join(list(SOURCE_PREFIXES.keys()) + ["all"])
+        valid = ", ".join(list(SOURCE_PREFIXES.keys()) + list(RAW_FEED_KEYS.keys()) + ["all"])
         raise ValueError(f"Unknown source '{source}'. Valid sources: {valid}")
     return prefix
+
+
+def retrieve_raw_feed(source: str, bucket: str = S3_BUCKET) -> dict:
+    """Return the raw JSON stored at the exact S3 key for a partner feed.
+
+    Used for sources in ``RAW_FEED_KEYS`` (e.g. ``sydney_forecast``) that are
+    saved as plain Open-Meteo JSON rather than ADAGE format.
+    Raises ``KeyError`` if the source is not in ``RAW_FEED_KEYS``.
+    Raises ``botocore.exceptions.ClientError`` (NoSuchKey) if the file hasn't
+    been collected yet.
+    """
+    key = RAW_FEED_KEYS[source]
+    return read_json(bucket, key)
 
 
 def filter_events_by_date(
