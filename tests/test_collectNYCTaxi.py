@@ -418,17 +418,10 @@ def test_lambda_handler_body_has_required_fields(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        call_count = {"n": 0}
-
-        def make_response(*args, **kwargs):
-            call_count["n"] += 1
-            records = MOCK_TLC_RECORDS if call_count["n"] == 1 else []
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = records
-            mock_resp.raise_for_status.return_value = None
-            return mock_resp
-
-        mock_get.side_effect = make_response
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_TLC_RECORDS,
+            raise_for_status=lambda: None,
+        )
         response = lambda_handler(event={}, context=None)
 
     import json
@@ -448,19 +441,11 @@ def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        call_count = {"n": 0}
-
-        def make_response(*args, **kwargs):
-            call_count["n"] += 1
-            records = MOCK_TLC_RECORDS if call_count["n"] == 1 else []
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = records
-            mock_resp.raise_for_status.return_value = None
-            return mock_resp
-
-        mock_get.side_effect = make_response
-        response = lambda_handler(event={}, context=None)
-
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_TLC_RECORDS,
+            raise_for_status=lambda: None,
+        )
+        lambda_handler(event={}, context=None)
 
     import json
     objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="tlc/raw")

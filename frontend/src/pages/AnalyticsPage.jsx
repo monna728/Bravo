@@ -110,19 +110,7 @@ function InsightCard({ insight }) {
   );
 }
 
-// ─── AI Summary Panel — fake streaming typewriter ─────────────────────────────
-// HOW THE FAKE WORKS:
-//   1. We store the full pre-written summary text in analyticsData.js per range.
-//   2. On click, we show a 1.4s "thinking" skeleton, then stream the text
-//      word-by-word using setInterval (30ms per word) so it looks like the
-//      model is generating live.
-//   3. Zero API calls, zero latency, looks identical to real streaming.
-//
-// TO MAKE IT REAL (when you have a backend proxy):
-//   Replace the startFakeStream() call with a real fetch() to your backend
-//   that calls Anthropic's streaming API and pipes SSE chunks back.
-//   Each chunk arrives as data.delta.text — append it to the displayed text.
-//   See: https://docs.anthropic.com/en/api/streaming
+// ─── AI Summary Panel ─────────────────────────────
 
 function AISummaryPanel({ summaryText, range }) {
   const [displayed, setDisplayed] = useState('');
@@ -145,7 +133,6 @@ function AISummaryPanel({ summaryText, range }) {
     setDisplayed('');
     setPhase('thinking');
 
-    // 1.4s fake "thinking" delay, then stream word by word
     setTimeout(() => {
       setPhase('streaming');
       const words = summaryText.split(' ');
