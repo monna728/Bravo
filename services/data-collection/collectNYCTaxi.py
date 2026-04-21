@@ -71,7 +71,7 @@ def fetch_tlc_data_for_day(target_date: date, limit: int = TRIPS_PER_DAY) -> lis
     params = {
         "$limit":  limit,
         "$where":  f"tpep_pickup_datetime >= '{day_start}' AND tpep_pickup_datetime <= '{day_end}'",
-        "$order":  "tpep_pickup_datetime DESC",
+        "$order":  "tpep_pickup_datetime ASC",
     }
 
     last_err: BaseException | None = None
