@@ -38,7 +38,7 @@ def lambda_handler(event: dict, context) -> dict:
     borough = params.get("borough")
     limit = params.get("limit")
     processed = params.get("processed")
-    bucket = params.get("bucket", os.environ.get("S3_BUCKET", "bucket-placeholder"))
+    bucket = params.get("bucket", os.environ.get("S3_BUCKET", "rushhour-data"))
 
     if borough and borough not in VALID_BOROUGHS:
         log_event(
@@ -60,12 +60,14 @@ def lambda_handler(event: dict, context) -> dict:
         try:
             raw_data = retrieve_raw_feed(source, bucket)
         except Exception as e:
+            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            is_not_found = error_code == "NoSuchKey"
             log_event(_SERVICE, "raw feed retrieve failed", level="ERROR",
                       context=context, event=event,
                       duration_ms=(time.perf_counter() - t0) * 1000,
                       error_type=type(e).__name__)
             return {
-                "statusCode": 404 if "NoSuchKey" in type(e).__name__ else 500,
+                "statusCode": 404 if is_not_found else 500,
                 "headers": CORS_HEADERS,
                 "body": json.dumps({
                     "status": "error",

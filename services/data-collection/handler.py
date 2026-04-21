@@ -1,53 +1,57 @@
-"""Lambda handler for data collection service.
+"""Dispatcher handler for bravo-data-collection Lambda.
 
-Orchestrates collection from all three sources:
-  - NYC TLC (taxi trips)
-  - Ticketmaster (events)
-  - Open-Meteo (weather)
+Two invocation modes, selected by the 'source' field in the event:
 
-Each source is collected independently so a failure in one
-does not block the others. Results are summarised in the response.
+1. Targeted collection (partner integrations, scheduled feeds):
+     { "source": "weather", ... }  -> collectWeather.lambda_handler
+     { "source": "tlc", ... }      -> collectNYCTaxi.lambda_handler
+     { "source": "ticketmaster" }  -> collectTicketmaster.lambda_handler
+
+2. Full-pipeline collection (default when 'source' is missing or 'all'):
+     {} -> runs all three collectors, returns combined summary.
+          A per-source error is captured and reported without failing the run.
 """
 
 import json
-import os
 
 import collectNYCTaxi as taxi
 import collectTicketmaster as ticketmaster
 import collectWeather as weather
 
+_ROUTES = {
+    "weather": weather.lambda_handler,
+    "tlc": taxi.lambda_handler,
+    "ticketmaster": ticketmaster.lambda_handler,
+}
 
-def lambda_handler(event: dict, context) -> dict:
-    """AWS Lambda entry point for data collection.
 
-    Runs all three collectors and returns a combined summary.
-    A per-source error is captured and reported without failing the whole run.
-    """
+def lambda_handler(event, context):
+    ev = event if isinstance(event, dict) else {}
+    source = (ev.get("source") or "").lower()
+
+    if source and source != "all":
+        handler = _ROUTES.get(source)
+        if handler is None:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": f"Unknown source '{source}'. "
+                             f"Valid values: {list(_ROUTES) + ['all']}"
+                }),
+            }
+        return handler(ev, context)
+
     results = {}
-
-    # --- NYC TLC ---
-    try:
-        response = taxi.lambda_handler(event, context)
-        results["nyc_tlc"] = json.loads(response["body"])
-        results["nyc_tlc"]["status"] = "success"
-    except Exception as e:
-        results["nyc_tlc"] = {"status": "error", "error": str(e)}
-
-    # --- Ticketmaster ---
-    try:
-        response = ticketmaster.lambda_handler(event, context)
-        results["ticketmaster"] = json.loads(response["body"])
-        results["ticketmaster"]["status"] = "success"
-    except Exception as e:
-        results["ticketmaster"] = {"status": "error", "error": str(e)}
-
-    # --- Weather ---
-    try:
-        response = weather.lambda_handler(event, context)
-        results["weather"] = json.loads(response["body"])
-        results["weather"]["status"] = "success"
-    except Exception as e:
-        results["weather"] = {"status": "error", "error": str(e)}
+    for key, handler in (("nyc_tlc", taxi.lambda_handler),
+                         ("ticketmaster", ticketmaster.lambda_handler),
+                         ("weather", weather.lambda_handler)):
+        try:
+            response = handler(ev, context)
+            results[key] = json.loads(response["body"])
+            results[key]["status"] = "success"
+        except Exception as e:
+            results[key] = {"status": "error", "error": str(e)}
 
     overall_status = (
         "success" if all(r["status"] == "success" for r in results.values())
