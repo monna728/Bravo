@@ -418,11 +418,18 @@ def test_lambda_handler_body_has_required_fields(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            json=lambda: MOCK_TLC_RECORDS,
-            raise_for_status=lambda: None,
-        )
+        # First day returns 2 records; remaining 89 days return empty
+        responses = []
+        for i in range(90):
+            responses.append(
+                MagicMock(
+                    json=lambda recs=(MOCK_TLC_RECORDS if i == 0 else []): recs,
+                    raise_for_status=lambda: None,
+                )
+            )
+        mock_get.side_effect = responses
         response = lambda_handler(event={}, context=None)
+
 
     import json
     body = json.loads(response["body"])
@@ -441,11 +448,17 @@ def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            json=lambda: MOCK_TLC_RECORDS,
-            raise_for_status=lambda: None,
-        )
-        lambda_handler(event={}, context=None)
+        # First day returns 2 records; remaining 89 days return empty
+        responses = []
+        for i in range(90):
+            responses.append(
+                MagicMock(
+                    json=lambda recs=(MOCK_TLC_RECORDS if i == 0 else []): recs,
+                    raise_for_status=lambda: None,
+                )
+            )
+        mock_get.side_effect = responses
+        response = lambda_handler(event={}, context=None)
 
     import json
     objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="tlc/raw")
