@@ -418,18 +418,18 @@ def test_lambda_handler_body_has_required_fields(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        # First day returns 2 records; remaining 89 days return empty
-        responses = []
-        for i in range(90):
-            responses.append(
-                MagicMock(
-                    json=lambda recs=(MOCK_TLC_RECORDS if i == 0 else []): recs,
-                    raise_for_status=lambda: None,
-                )
-            )
-        mock_get.side_effect = responses
-        response = lambda_handler(event={}, context=None)
+        call_count = {"n": 0}
 
+        def make_response(*args, **kwargs):
+            call_count["n"] += 1
+            records = MOCK_TLC_RECORDS if call_count["n"] == 1 else []
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = records
+            mock_resp.raise_for_status.return_value = None
+            return mock_resp
+
+        mock_get.side_effect = make_response
+        response = lambda_handler(event={}, context=None)
 
     import json
     body = json.loads(response["body"])
@@ -448,17 +448,19 @@ def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
     s3.create_bucket(Bucket=S3_BUCKET)
 
     with patch("collectNYCTaxi.requests.get") as mock_get:
-        # First day returns 2 records; remaining 89 days return empty
-        responses = []
-        for i in range(90):
-            responses.append(
-                MagicMock(
-                    json=lambda recs=(MOCK_TLC_RECORDS if i == 0 else []): recs,
-                    raise_for_status=lambda: None,
-                )
-            )
-        mock_get.side_effect = responses
+        call_count = {"n": 0}
+
+        def make_response(*args, **kwargs):
+            call_count["n"] += 1
+            records = MOCK_TLC_RECORDS if call_count["n"] == 1 else []
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = records
+            mock_resp.raise_for_status.return_value = None
+            return mock_resp
+
+        mock_get.side_effect = make_response
         response = lambda_handler(event={}, context=None)
+
 
     import json
     objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="tlc/raw")
