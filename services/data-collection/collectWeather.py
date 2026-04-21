@@ -6,7 +6,9 @@ import boto3
 import requests
 from datetime import date, datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, ".."))  # local: services/ contains shared/
+sys.path.insert(0, _HERE)                        # Lambda: /var/task/ contains shared/
 from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 
@@ -22,12 +24,22 @@ TIMEZONE       = "America/New_York"
 FORECAST_DAYS  = 7
 WEATHER_LOOKBACK_DAYS = 90
 
-# Partner integration — T18_ECHO (Venus) Sydney coordinates
+# Partner integration — T18_ECHO (Venus) Sydney / Parramatta coordinates
 SYDNEY_LAT     = -33.8688
 SYDNEY_LNG     = 151.2093
-# Stable S3 key for the daily-refreshed Sydney raw forecast (raw Open-Meteo JSON, no ADAGE wrapping).
-# T18_ECHO reads this key directly via GET /retrieve?source=sydney_forecast.
-SYDNEY_RAW_S3_KEY = "weather/raw/sydney_forecast.json"
+PARRAMATTA_LAT = -33.8150
+PARRAMATTA_LNG = 151.0000
+# Stable S3 keys for daily-refreshed raw forecasts (raw Open-Meteo JSON, no ADAGE wrapping).
+# T18_ECHO reads these keys directly via GET /retrieve?source=<key>.
+SYDNEY_RAW_S3_KEY     = "weather/raw/sydney_forecast.json"
+PARRAMATTA_RAW_S3_KEY = "weather/raw/parramatta_forecast.json"
+
+# Default hourly variables for NYC/Sydney consumers that still want hourly rows.
+DEFAULT_HOURLY_VARS = "precipitation,temperature_2m,precipitation_probability"
+# Default daily variables for partners requesting daily aggregates (T18_ECHO Parramatta feed).
+DEFAULT_DAILY_VARS = (
+    "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max"
+)
 
 
 def fetch_weather_data(
@@ -38,26 +50,35 @@ def fetch_weather_data(
     lookback_days: int = WEATHER_LOOKBACK_DAYS,
     start_date: str | None = None,
     end_date: str | None = None,
+    hourly: str | None = None,
+    daily: str | None = None,
 ):
-    """Return Open-Meteo hourly JSON.
+    """Return Open-Meteo JSON (hourly and/or daily aggregates).
 
-    If ``forecast_days`` is set, uses the short-range **forecast** API (for tests / quick runs).
-    Otherwise uses the **archive** API for ``lookback_days`` ending ``end_date`` (default: today),
-    giving roughly that many calendar days of hourly history (>= 90 days when defaults apply).
+    If ``forecast_days`` is set, uses the short-range **forecast** API.
+    Otherwise uses the **archive** API for ``lookback_days`` ending ``end_date``.
+
+    ``hourly`` / ``daily`` accept comma-separated Open-Meteo variable names and
+    override the defaults. Pass ``hourly=""`` to request daily-only payloads.
 
     Timezone: "auto" is used for non-NYC coordinates so Open-Meteo returns
     timestamps in the correct local time for that location (e.g. AEST for Sydney).
     """
     tz = TIMEZONE if (lat == DEFAULT_LAT and lng == DEFAULT_LNG) else "auto"
+    hourly_vars = DEFAULT_HOURLY_VARS if hourly is None else hourly
+
+    params: dict = {
+        "latitude": lat,
+        "longitude": lng,
+        "timezone": tz,
+    }
+    if hourly_vars:
+        params["hourly"] = hourly_vars
+    if daily:
+        params["daily"] = daily
 
     if forecast_days is not None:
-        params = {
-            "latitude": lat,
-            "longitude": lng,
-            "hourly": "precipitation,temperature_2m,precipitation_probability",
-            "forecast_days": forecast_days,
-            "timezone": tz,
-        }
+        params["forecast_days"] = forecast_days
         response = requests.get(OPEN_METEO_FORECAST_API, params=params, timeout=60)
         response.raise_for_status()
         return response.json()
@@ -69,14 +90,8 @@ def fetch_weather_data(
         end_d = date.fromisoformat(end)
         start = (end_d - timedelta(days=lookback_days - 1)).isoformat()
 
-    params = {
-        "latitude": lat,
-        "longitude": lng,
-        "start_date": start,
-        "end_date": end,
-        "hourly": "precipitation,temperature_2m,precipitation_probability",
-        "timezone": tz,
-    }
+    params["start_date"] = start
+    params["end_date"] = end
     response = requests.get(OPEN_METEO_ARCHIVE_API, params=params, timeout=120)
     response.raise_for_status()
     return response.json()
@@ -213,6 +228,9 @@ def lambda_handler(event, context):
     # location-specific key and return it directly.  Used by partner integrations
     # (e.g. T18_ECHO Venus) that consume the Open-Meteo schema directly.
     return_raw = ev.get("return_raw") is True
+    # Custom Open-Meteo variable selection for partner feeds.  Pass "" to skip hourly.
+    hourly_vars = ev.get("hourly")
+    daily_vars = ev.get("daily")
 
     raw_response = fetch_weather_data(
         lat=lat,
@@ -221,9 +239,12 @@ def lambda_handler(event, context):
         lookback_days=lookback,
         start_date=start_d,
         end_date=end_d,
+        hourly=hourly_vars,
+        daily=daily_vars,
     )
     n_hourly = len(raw_response.get("hourly", {}).get("time", []))
-    print(f"Fetched {n_hourly} hourly records from Open-Meteo")
+    n_daily = len(raw_response.get("daily", {}).get("time", []))
+    print(f"Fetched {n_hourly} hourly / {n_daily} daily records from Open-Meteo")
 
     try:
         if return_raw:

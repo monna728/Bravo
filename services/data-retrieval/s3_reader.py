@@ -10,7 +10,7 @@ import os
 import boto3
 from datetime import datetime
 
-S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
+S3_BUCKET = os.environ.get("S3_BUCKET", "rushhour-data")
 
 VALID_BOROUGHS = {"Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}
 
@@ -23,13 +23,28 @@ SOURCE_PREFIXES = {
 
 # Exact S3 keys for partner raw-JSON feeds (not prefix-scanned, returned verbatim).
 RAW_FEED_KEYS = {
-    "sydney_forecast": "weather/raw/sydney_forecast.json",
+    "sydney_forecast":     "weather/raw/sydney_forecast.json",
+    "sydney_history":      "weather/raw/sydney_history.json",
+    "parramatta_forecast": "weather/raw/parramatta_forecast.json",
 }
+
+
+def _s3_client():
+    """Return an S3 client, respecting the S3_REGION env var if set.
+
+    Needed when the Lambda region differs from the S3 bucket region.
+    boto3 defaults to the Lambda's region; without an explicit region,
+    cross-region GetObject requests can hang on the redirect.
+    """
+    region = os.environ.get("S3_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if region:
+        return boto3.client("s3", region_name=region)
+    return boto3.client("s3")
 
 
 def list_keys(bucket: str, prefix: str) -> list[str]:
     """List all .json object keys under a given S3 prefix."""
-    s3 = boto3.client("s3")
+    s3 = _s3_client()
     keys = []
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -41,7 +56,7 @@ def list_keys(bucket: str, prefix: str) -> list[str]:
 
 def read_json(bucket: str, key: str) -> dict:
     """Read a single JSON file from S3 and return as a dict."""
-    s3 = boto3.client("s3")
+    s3 = _s3_client()
     obj = s3.get_object(Bucket=bucket, Key=key)
     return json.loads(obj["Body"].read().decode("utf-8"))
 

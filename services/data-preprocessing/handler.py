@@ -22,7 +22,7 @@ from shared.lambda_observability import deployment_env, emit_embedded_metric, lo
 from normaliser import normalise_ticketmaster, normalise_nyc_taxi, normalise_weather
 from merger import merge_by_date, merged_to_adage
 
-S3_BUCKET = os.environ.get("rushhour-data", "bucket-placeholder")
+S3_BUCKET = os.environ.get("S3_BUCKET", "rushhour-data")
 TIMEZONE = "America/New_York"
 
 RAW_PREFIXES = {

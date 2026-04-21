@@ -32,7 +32,7 @@ _sys.path.insert(0, os.path.join(_ROOT, ".."))
 from shared.cors import CORS_HEADERS  # noqa: E402
 from report_generator import build_report, save_report_to_s3  # noqa: E402
 
-DEFAULT_BUCKET = os.environ.get("rushhour-data", os.environ.get("S3_BUCKET_NAME", "bucket-placeholder"))
+DEFAULT_BUCKET = os.environ.get("S3_BUCKET", "rushhour-data")
 ACC_THRESHOLD = ACCURACY_THRESHOLD
 
 

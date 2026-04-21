@@ -14,7 +14,9 @@ try:
 except ImportError:
     pass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, ".."))  # local: services/ contains shared/
+sys.path.insert(0, _HERE)                        # Lambda: /var/task/ contains shared/
 from shared.cors import CORS_HEADERS
 from shared.lambda_observability import deployment_env, emit_embedded_metric, log_event
 

@@ -52,7 +52,7 @@ def lambda_handler(event: dict, context) -> dict:
     time_of_day = body.get("time_of_day", "all")
     event_type = body.get("event_type")
     compare_all = body.get("compare_all_boroughs", False)
-    bucket = body.get("bucket", os.environ.get("rushhour-data", "bucket-placeholder"))
+    bucket = body.get("bucket", os.environ.get("S3_BUCKET", "rushhour-data"))
 
     if not compare_all and not borough:
         return _fail(400, "borough is required (or set compare_all_boroughs to true)")

@@ -7,3 +7,8 @@ __pycache__/
 
 # ignore temp local test file
 test_output.json
+
+# Lambda deployment build artifacts
+dist/
+payload.json
+response.json
