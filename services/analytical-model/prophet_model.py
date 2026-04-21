@@ -47,8 +47,9 @@ SIGNAL_WEIGHTS = {
     "weather": 0.20,
 }
 
-# Normal operation (proposal): ~90 calendar days of merged history for training context.
-DEFAULT_LOOKBACK_DAYS = 90
+# Look back far enough to always capture the 2023-2024 TLC training window even when
+# predicting dates in 2026. Prophet extrapolates trend + weekly/yearly seasonality forward.
+DEFAULT_LOOKBACK_DAYS = 1100
 # Engineering floor: below this many rows Prophet fits are unreliable; we warn / fallback instead of
 # claiming a full 90-day-quality forecast. (Proposal footnote: <14 days → insufficient for a reliable fit.)
 MIN_DATAPOINTS = 14
@@ -122,15 +123,22 @@ def build_prophet_dataframe(records: list[dict]) -> pd.DataFrame:
     """Convert merged daily records into a DataFrame suitable for Prophet.
 
     Columns: ds, y (trip_count), event_count, is_rainy, temperature_c
+
+    Records with trip_count == 0 are excluded from training — these are merged
+    rows from periods where TLC data was not collected and would corrupt the fit.
     """
     rows = []
     for r in records:
+        trip_count = float(r.get("trip_count", 0))
+        if trip_count == 0:
+            continue
+
         weather = r.get("dominant_weather", "clear").lower()
         is_rainy = 1 if weather in ("rain", "showers", "thunderstorm", "snow") else 0
 
         rows.append({
             "ds": pd.Timestamp(r["date"]),
-            "y": float(r.get("trip_count", 0)),
+            "y": trip_count,
             "event_count": float(r.get("event_count", 0)),
             "is_rainy": float(is_rainy),
             "temperature_c": float(r.get("temperature_avg_c", 15.0)),
@@ -181,7 +189,7 @@ def fit_and_forecast(
         if future_ds_only is not None and not future_ds_only.empty:
             future = future_ds_only[["ds"]].copy()
         else:
-            future = model.make_future_dataframe(periods=num_days, include_history=False)
+            future = pd.DataFrame({"ds": pd.date_range(start=start_dt, end=end_dt, freq="D")})
         return model.predict(future)
 
     model.add_regressor("event_count")
@@ -196,7 +204,8 @@ def fit_and_forecast(
             ["ds", "event_count", "is_rainy", "temperature_c"]
         ].copy()
     else:
-        future = model.make_future_dataframe(periods=num_days, include_history=False)
+        # Always predict exactly the requested date range, not anchored to training end.
+        future = pd.DataFrame({"ds": pd.date_range(start=start_dt, end=end_dt, freq="D")})
         last_event_count = float(historical_df["event_count"].iloc[-1]) if len(historical_df) > 0 else 0.0
         last_is_rainy = float(historical_df["is_rainy"].iloc[-1]) if len(historical_df) > 0 else 0.0
         last_temp = float(historical_df["temperature_c"].iloc[-1]) if len(historical_df) > 0 else 15.0
