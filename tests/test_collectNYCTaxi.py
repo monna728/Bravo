@@ -417,14 +417,9 @@ def test_lambda_handler_body_has_required_fields(aws_credentials):
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=S3_BUCKET)
 
-    with patch("collectNYCTaxi.requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            json=lambda: MOCK_TLC_RECORDS,
-            raise_for_status=lambda: None,
-        )
+    with patch("collectNYCTaxi.fetch_tlc_trips_lookback", return_value=MOCK_TLC_RECORDS):
         response = lambda_handler(event={}, context=None)
 
-    import json
     body = json.loads(response["body"])
     assert "message" in body
     assert "records_collected" in body
@@ -440,14 +435,9 @@ def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=S3_BUCKET)
 
-    with patch("collectNYCTaxi.requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            json=lambda: MOCK_TLC_RECORDS,
-            raise_for_status=lambda: None,
-        )
+    with patch("collectNYCTaxi.fetch_tlc_trips_lookback", return_value=MOCK_TLC_RECORDS):
         lambda_handler(event={}, context=None)
 
-    import json
     objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="tlc/raw")
     keys = [obj["Key"] for obj in objects.get("Contents", [])]
     assert len(keys) >= 1
@@ -456,26 +446,26 @@ def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
     assert stored["data_source"] == "nyc_tlc"
     assert stored["dataset_type"] == "taxi_trips"
     assert len(stored["events"]) == 2
-    # Zone enrichment must survive the full pipeline
     assert stored["events"][0]["attribute"]["pickup_borough"] == "Manhattan"
     assert stored["events"][0]["attribute"]["pickup_zone"] == "Midtown Center"
 
-
 @mock_aws
 def test_lambda_handler_request_params(aws_credentials):
-    """lambda_handler fetches with the correct $limit and $order parameters."""
+    """lambda_handler fetches per-day data with correct $limit and $order parameters."""
     from collectNYCTaxi import lambda_handler
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=S3_BUCKET)
 
-    with patch("collectNYCTaxi.requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            json=lambda: MOCK_TLC_RECORDS,
-            raise_for_status=lambda: None,
-        )
-        lambda_handler(event={}, context=None)
+    with patch("collectNYCTaxi._latest_dataset_date", return_value=_date(2026, 3, 14)):
+        with patch("collectNYCTaxi.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(
+                json=lambda: MOCK_TLC_RECORDS,
+                raise_for_status=lambda: None,
+            )
+            lambda_handler(event={"lookback_days": 1, "trips_per_day": 2}, context=None)
 
+    # The per-day fetch uses ASC; DESC is only used in the probe query
     params = mock_get.call_args[1]["params"]
     assert "$limit" in params
     assert "tpep_pickup_datetime" in params["$order"]
-    assert "DESC" in params["$order"]
+    assert "ASC" in params["$order"]

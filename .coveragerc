@@ -8,6 +8,11 @@ omit =
   services/testing/accuracy_tester.py
   services/testing/backtester.py
   services/testing/data_sampler.py
+  services/data-preprocessing/attr/*
+  services/data-preprocessing/referencing_local/*
+  services/data-preprocessing/jsonschema_specifications/*
+  services/data-preprocessing/attrs/*
+
 
 [report]
 show_missing = True
