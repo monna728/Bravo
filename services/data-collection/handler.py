@@ -1,38 +1,69 @@
 """Dispatcher handler for bravo-data-collection Lambda.
 
-Routes to the correct collector based on the 'source' field in the event:
-  - "weather"       → collectWeather.lambda_handler  (default)
-  - "tlc"           → collectNYCTaxi.lambda_handler
-  - "ticketmaster"  → collectTicketmaster.lambda_handler
+Two invocation modes, selected by the 'source' field in the event:
 
-Example test event:
-  { "source": "weather", "lat": -33.8688, "lng": 151.2093,
-    "use_forecast_only": true, "return_raw": true }
-  { "source": "tlc" }
-  { "source": "ticketmaster" }
+1. Targeted collection (partner integrations, scheduled feeds):
+     { "source": "weather", ... }  -> collectWeather.lambda_handler
+     { "source": "tlc", ... }      -> collectNYCTaxi.lambda_handler
+     { "source": "ticketmaster" }  -> collectTicketmaster.lambda_handler
+
+2. Full-pipeline collection (default when 'source' is missing or 'all'):
+     {} -> runs all three collectors, returns combined summary.
+          A per-source error is captured and reported without failing the run.
 """
 
 import json
 
-from collectWeather import lambda_handler as _weather
-from collectNYCTaxi import lambda_handler as _tlc
-from collectTicketmaster import lambda_handler as _ticketmaster
+import collectNYCTaxi as taxi
+import collectTicketmaster as ticketmaster
+import collectWeather as weather
 
 _ROUTES = {
-    "weather": _weather,
-    "tlc": _tlc,
-    "ticketmaster": _ticketmaster,
+    "weather": weather.lambda_handler,
+    "tlc": taxi.lambda_handler,
+    "ticketmaster": ticketmaster.lambda_handler,
 }
 
 
 def lambda_handler(event, context):
-    source = (event or {}).get("source", "weather")
-    handler = _ROUTES.get(source)
-    if handler is None:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({
-                "error": f"Unknown source '{source}'. Valid values: {list(_ROUTES)}"
-            }),
-        }
-    return handler(event, context)
+    ev = event if isinstance(event, dict) else {}
+    source = (ev.get("source") or "").lower()
+
+    if source and source != "all":
+        handler = _ROUTES.get(source)
+        if handler is None:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": f"Unknown source '{source}'. "
+                             f"Valid values: {list(_ROUTES) + ['all']}"
+                }),
+            }
+        return handler(ev, context)
+
+    results = {}
+    for key, handler in (("nyc_tlc", taxi.lambda_handler),
+                         ("ticketmaster", ticketmaster.lambda_handler),
+                         ("weather", weather.lambda_handler)):
+        try:
+            response = handler(ev, context)
+            results[key] = json.loads(response["body"])
+            results[key]["status"] = "success"
+        except Exception as e:
+            results[key] = {"status": "error", "error": str(e)}
+
+    overall_status = (
+        "success" if all(r["status"] == "success" for r in results.values())
+        else "partial"
+    )
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "message": "Data collection complete",
+            "overall_status": overall_status,
+            "sources": results,
+        }),
+    }

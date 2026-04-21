@@ -22,7 +22,7 @@ from shared.lambda_observability import deployment_env, emit_embedded_metric, lo
 
 TICKETMASTER_API = "https://app.ticketmaster.com/discovery/v2/events.json"
 API_KEY = os.environ.get("TICKETMASTER_API_KEY", "")
-S3_BUCKET = "rushhour-data"
+S3_BUCKET = "S3_BUCKET"
 S3_KEY_PREFIX = "ticketmaster/raw"
 DEFAULT_CITY = "New York"
 DEFAULT_STATE = "NY"

@@ -21,7 +21,7 @@ from shared.lambda_observability import deployment_env, emit_embedded_metric, lo
 from taxiZone_lookup import ZONE_LOOKUP
 
 NYC_TLC_API = "https://data.cityofnewyork.us/resource/4b4i-vvec.json"
-S3_BUCKET   = "rushhour-data"
+S3_BUCKET   = "S3_BUCKET"
 S3_KEY = f"tlc/raw/tlc_trips_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
 TIMEZONE    = "America/New_York"
 

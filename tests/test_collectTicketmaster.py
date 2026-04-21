@@ -1,6 +1,7 @@
 import json
 import pytest
 import boto3
+import uuid
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
 
@@ -23,12 +24,16 @@ from collectTicketmaster import (
     S3_KEY_PREFIX,
 )
 
+def _test_key(service: str) -> str:
+    """Generate a unique S3 key scoped to this test run."""
+    run_id = os.environ.get("GITHUB_RUN_ID", str(uuid.uuid4())[:8])
+    return f"integration-tests/{run_id}/{service}/smoke_test.json"
 
-@pytest.fixture(autouse=True)
-def aws_credentials(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+# @pytest.fixture(autouse=True)
+# def aws_credentials(monkeypatch):
+#     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+#     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+#     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
 
 
 MOCK_EVENT = {

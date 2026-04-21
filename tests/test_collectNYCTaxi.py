@@ -19,11 +19,11 @@ from collectNYCTaxi import (
 from datetime import date as _date
 
 
-@pytest.fixture(autouse=True)
-def aws_credentials(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+# @pytest.fixture(autouse=True)
+# def aws_credentials(monkeypatch):
+#     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+#     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+#     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
 
 
 MOCK_TLC_RECORD_1 = {
@@ -390,3 +390,82 @@ def test_full_pipeline_fetch_transform_save(aws_credentials):
     assert stored["events"][0]["attribute"]["dropoff_zone"] == "Times Sq/Theatre District"
     assert stored["events"][0]["time_object"]["duration"] == 23.5
     assert stored["events"][1]["attribute"]["trip_distance"] == 1.2
+
+# ── Lambda Handler Tests ──────────────────────────────────────────────────────
+
+@mock_aws
+def test_lambda_handler_returns_200(aws_credentials):
+    """lambda_handler returns HTTP 200 on a successful run."""
+    from collectNYCTaxi import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("collectNYCTaxi.requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            json=lambda: MOCK_TLC_RECORDS,
+            raise_for_status=lambda: None,
+        )
+        response = lambda_handler(event={}, context=None)
+
+    assert response["statusCode"] == 200
+
+
+@mock_aws
+def test_lambda_handler_body_has_required_fields(aws_credentials):
+    """lambda_handler response body contains message, records_collected, s3_location."""
+    from collectNYCTaxi import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("collectNYCTaxi.fetch_tlc_trips_lookback", return_value=MOCK_TLC_RECORDS):
+        response = lambda_handler(event={}, context=None)
+
+    body = json.loads(response["body"])
+    assert "message" in body
+    assert "records_collected" in body
+    assert "s3_location" in body
+    assert body["records_collected"] == 2
+    assert body["s3_location"].startswith(f"s3://{S3_BUCKET}/")
+
+
+@mock_aws
+def test_lambda_handler_writes_valid_adage_to_s3(aws_credentials):
+    """lambda_handler stores valid ADAGE 3.0 JSON with zone enrichment under tlc/raw."""
+    from collectNYCTaxi import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("collectNYCTaxi.fetch_tlc_trips_lookback", return_value=MOCK_TLC_RECORDS):
+        lambda_handler(event={}, context=None)
+
+    objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="tlc/raw")
+    keys = [obj["Key"] for obj in objects.get("Contents", [])]
+    assert len(keys) >= 1
+
+    stored = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=keys[0])["Body"].read())
+    assert stored["data_source"] == "nyc_tlc"
+    assert stored["dataset_type"] == "taxi_trips"
+    assert len(stored["events"]) == 2
+    assert stored["events"][0]["attribute"]["pickup_borough"] == "Manhattan"
+    assert stored["events"][0]["attribute"]["pickup_zone"] == "Midtown Center"
+
+@mock_aws
+def test_lambda_handler_request_params(aws_credentials):
+    """lambda_handler fetches per-day data with correct $limit and $order parameters."""
+    from collectNYCTaxi import lambda_handler
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=S3_BUCKET)
+
+    with patch("collectNYCTaxi._latest_dataset_date", return_value=_date(2026, 3, 14)):
+        with patch("collectNYCTaxi.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(
+                json=lambda: MOCK_TLC_RECORDS,
+                raise_for_status=lambda: None,
+            )
+            lambda_handler(event={"lookback_days": 1, "trips_per_day": 2}, context=None)
+
+    # The per-day fetch uses ASC; DESC is only used in the probe query
+    params = mock_get.call_args[1]["params"]
+    assert "$limit" in params
+    assert "tpep_pickup_datetime" in params["$order"]
+    assert "ASC" in params["$order"]
