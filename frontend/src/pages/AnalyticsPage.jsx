@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { RANGE_DATA } from '../data/analyticsData';
+import BoroughSearch from '../components/BoroughSearch';
+import PredictionResult from '../components/PredictionResult';
 
 // ─── Chart components (pure SVG / CSS, no extra deps) ────────────────────────
 
@@ -221,6 +223,8 @@ const BOROUGH_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
 export default function AnalyticsPage() {
   const [range, setRange] = useState('7d');
   const d = RANGE_DATA[range];
+  const [predResult, setPredResult] = useState(null);
+  const [predError, setPredError]   = useState(null);
 
   return (
     <div className="w-screen min-h-screen bg-gray-50 overflow-y-auto">
@@ -345,6 +349,24 @@ export default function AnalyticsPage() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* ── Live Demand Forecast ──────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
+          <h2 className="text-sm font-semibold text-gray-800 mb-1">Live Demand Forecast</h2>
+          <p className="text-xs text-gray-400 mb-4">
+            Predict crowd demand for any borough and date range using the RushHour analytical model.
+          </p>
+          <BoroughSearch
+            onResult={(r) => { setPredResult(r); setPredError(null); }}
+            onError={(msg) => { setPredError(msg); setPredResult(null); }}
+          />
+          {predError && (
+            <div className="mt-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
+              {predError}
+            </div>
+          )}
+          <PredictionResult result={predResult} />
         </div>
 
         {/* Event demand lift */}
